@@ -54,7 +54,9 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
           user={{ id: ctx.user.id, name: ctx.user.name, role: ROLE_LABEL[role] }}
           demoUsers={demoUsers ? demoUsers.map((u) => ({ id: u.id, name: u.name })) : null}
         />
-        <main className="mx-auto w-full min-w-0 max-w-[1180px] flex-1 px-4 py-6 sm:px-8 sm:py-9">{children}</main>
+        <main className="w-full min-w-0 flex-1 px-4 py-6 sm:px-8 sm:py-9 xl:px-10">
+          <div className="mx-auto w-full max-w-[1600px]">{children}</div>
+        </main>
       </div>
     </ToastProvider>
   );

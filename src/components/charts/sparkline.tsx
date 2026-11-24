@@ -6,7 +6,7 @@ const ACCENT = "#eb6834";
 export function Sparkline({
   values,
   label,
-  width = 104,
+  width = 84,
   height = 34,
 }: {
   values: number[];

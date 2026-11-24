@@ -17,8 +17,8 @@ function StatTile({ label, value, chip, sub, chart }: { label: string; value: Re
         <span className="text-[13px] text-stone-500">{label}</span>
         {chip}
       </div>
-      <div className="mt-3 flex items-end justify-between gap-3">
-        <div className="min-w-0 truncate text-[26px] font-semibold leading-none tracking-tight text-stone-900">{value}</div>
+      <div className="mt-3 flex flex-wrap items-end justify-between gap-x-3 gap-y-2">
+        <div className="text-[26px] font-semibold leading-none tracking-tight text-stone-900">{value}</div>
         {chart}
       </div>
       {sub && <div className="mt-2.5 text-xs text-stone-500">{sub}</div>}
@@ -43,7 +43,7 @@ function AttentionRow({ item, orgName }: { item: AttentionItem; orgName: string 
         </span>
         <div className="min-w-0 flex-1">
           <div className="flex items-start justify-between gap-2">
-            <Link href={item.href} className="min-w-0 truncate text-sm font-semibold text-stone-900 hover:underline">
+            <Link href={item.href} className="line-clamp-2 min-w-0 text-sm font-semibold text-stone-900 hover:underline">
               {item.title}
             </Link>
             <Badge tone={item.tone as Tone}>{item.pill}</Badge>
@@ -174,11 +174,11 @@ export default async function TodayPage() {
 
       <Insights items={data.insights} />
 
-      <div className="grid items-start gap-6 lg:grid-cols-[minmax(0,1fr)_360px]">
+      <div className="grid items-start gap-6 lg:grid-cols-[minmax(0,1fr)_360px] 2xl:grid-cols-[minmax(0,1fr)_420px]">
         <div className="min-w-0 space-y-6">
           <section>
             <h2 className="mb-3 text-[15px] font-semibold tracking-tight text-stone-900">Locations today</h2>
-            <div className="grid gap-4 sm:grid-cols-[repeat(auto-fill,minmax(210px,1fr))]">
+            <div className="grid gap-4 sm:grid-cols-[repeat(auto-fit,minmax(220px,1fr))]">
               {dash.locations.map((loc) => {
                 const day = dash.todayByLocation[loc.id];
                 const collected = data.collectedToday[loc.id];
