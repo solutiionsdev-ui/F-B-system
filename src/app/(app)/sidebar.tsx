@@ -75,7 +75,7 @@ function SidebarBody({ groups, org, orgs, user, demoUsers, onNavigate }: Props &
       <nav className="mt-5 flex-1 space-y-5 overflow-y-auto px-3" aria-label="Main">
         {groups.map((g) => (
           <div key={g.label}>
-            <div className="px-3 pb-1.5 text-[11px] font-medium text-stone-400">{g.label}</div>
+            <div className="px-3 pb-1.5 font-mono text-[10.5px] font-medium uppercase tracking-[0.08em] text-stone-400">{g.label}</div>
             <ul className="space-y-0.5">
               {g.links.map((l) => {
                 const active = isActive(pathname, l.href);

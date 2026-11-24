@@ -21,6 +21,7 @@ import {
   saveManualSales,
   setOpeningFloat,
   setRate,
+  todayIn,
   UserError,
   voidExpense,
   type SalesTotalsInput,
@@ -40,6 +41,7 @@ import {
   applyProfile,
   createImportDraft,
   deleteProfile,
+  discardImport,
   mappingFromForm,
   postImport,
   saveMapping,
@@ -330,6 +332,7 @@ async function inviteResult(
   try {
     const { token, email } = await fn(ctx, db);
     revalidatePath("/team");
+    revalidatePath("/");
     return { ok, at: Date.now(), data: { path: `/invite/${token}`, email } };
   } catch (e) {
     return { error: toMessage(e) };
@@ -431,4 +434,53 @@ export async function undoImportAction(importId: string) {
 
 export async function deleteProfileAction(_: ActionState, fd: FormData) {
   return run((ctx, db) => deleteProfile(db, ctx.scope, str(fd, "profileId")), ["/import"], "Format deleted");
+}
+
+export async function discardImportAction(importId: string): Promise<ActionState> {
+  const ctx = await requireContext();
+  const db = await getDb();
+  try {
+    await discardImport(db, ctx.scope, importId);
+  } catch (e) {
+    return { error: toMessage(e) };
+  }
+  revalidatePath("/import");
+  revalidatePath("/");
+  return { ok: "File discarded", at: Date.now() };
+}
+
+/** "Needs you": import a clean draft in one click, opening any missing days. */
+export async function quickImportAction(importId: string): Promise<ActionState> {
+  return run(
+    (ctx, db) => postImport(db, ctx.scope, importId, { createMissingDays: true }),
+    ["/", "/import", `/import/${importId}`],
+    "Imported",
+  );
+}
+
+/** "Needs you": open today's business day for a location; the float can be set on the day page. */
+export async function quickOpenDayAction(locationId: string): Promise<ActionState> {
+  const ctx = await requireContext();
+  const db = await getDb();
+  let id: string;
+  try {
+    const day = await openDay(db, ctx.scope, { locationId, businessDate: todayIn(), openingFloat: { USD: 0n, LBP: 0n } });
+    id = day.id;
+  } catch (e) {
+    return { error: toMessage(e) };
+  }
+  revalidatePath("/");
+  redirect(`/days/${id}#count`);
+}
+
+/** Import page: discard the draft and go back to the list. */
+export async function discardImportAndReturnAction(importId: string): Promise<ActionState> {
+  const res = await discardImportAction(importId);
+  if (res.error) return res;
+  redirect("/import");
+}
+
+/** "Needs you": make a fresh invite link (the old one stops working). */
+export async function quickRenewInviteAction(inviteId: string) {
+  return inviteResult((ctx, db) => renewInvite(db, ctx.scope, inviteId), "New link created");
 }

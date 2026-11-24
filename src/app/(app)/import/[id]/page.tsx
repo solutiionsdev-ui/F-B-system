@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { applyProfileAction, postImportAction, saveMappingAction, undoImportAction } from "@/app/actions";
+import { applyProfileAction, discardImportAndReturnAction, postImportAction, saveMappingAction, undoImportAction } from "@/app/actions";
 import { ActionForm } from "@/components/action-form";
 import { Badge, Card, Field, formatDate, formatTime, inlineInputClass, inputClass, Money, PageTitle } from "@/components/ui";
 import { formatRate, parseRate } from "@/lib/money";
@@ -191,7 +191,7 @@ export default async function ImportDetailPage({ params }: { params: Promise<{ i
                     )}
                     <div className="overflow-x-auto">
                       <table className="w-full text-sm">
-                        <thead className="text-left text-xs font-medium text-stone-500">
+                        <thead className="text-left font-mono text-[10.5px] font-medium uppercase tracking-[0.06em] text-stone-400">
                           <tr>
                             <th className="pb-2 pr-2">Business day</th>
                             <th className="pb-2 pr-2 text-right">Lines</th>
@@ -281,6 +281,18 @@ export default async function ImportDetailPage({ params }: { params: Promise<{ i
                       </p>
                     )}
                   </ActionForm>
+                  <div className="mt-4 border-t border-stone-100 pt-3">
+                    <ActionForm
+                      action={discardImportAndReturnAction.bind(null, imp.id)}
+                      submitLabel="Discard this file"
+                      pendingLabel="Discarding…"
+                      variant="ghost"
+                      className="contents"
+                      confirmText={`Discard ${imp.fileName}? Nothing has been imported from it.`}
+                    >
+                      <span />
+                    </ActionForm>
+                  </div>
                 </Card>
               )}
             </div>

@@ -29,7 +29,9 @@ export function Card({
   actions,
   children,
   className = "",
+  id,
 }: {
+  id?: string;
   title?: ReactNode;
   step?: number;
   description?: ReactNode;
@@ -38,7 +40,7 @@ export function Card({
   className?: string;
 }) {
   return (
-    <section className={`min-w-0 rounded-2xl border border-stone-200/80 bg-white shadow-[0_1px_2px_rgba(28,25,23,0.04)] ${className}`}>
+    <section id={id} className={`min-w-0 scroll-mt-6 rounded-2xl border border-stone-200/80 bg-white shadow-[0_1px_2px_rgba(28,25,23,0.04)] ${className}`}>
       {(title || actions) && (
         <header className="flex flex-wrap items-start justify-between gap-3 px-5 pt-4 pb-3">
           <div className="flex items-start gap-2.5">
@@ -182,5 +184,5 @@ export function Logo({ size = 28 }: { size?: number }) {
   );
 }
 
-/** Small grey section heading used inside cards and sidebars. */
-export const tableHeadClass = "text-left text-xs font-medium text-stone-500";
+/** Small mono caps label: table headers, chart axes, legends, timestamps. */
+export const microClass = "font-mono text-[10.5px] font-medium uppercase tracking-[0.06em] text-stone-400";

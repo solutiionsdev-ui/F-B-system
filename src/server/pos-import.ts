@@ -492,6 +492,19 @@ export async function undoImport(db: DB, scope: TenantScope, importId: string) {
   });
 }
 
+/** Throws away an uploaded file that was never imported. */
+export async function discardImport(db: DB, scope: TenantScope, importId: string) {
+  requireImporter(scope);
+  return withTenant(db, scope, async (tx) => {
+    const rows = await tx
+      .delete(posImports)
+      .where(and(eq(posImports.id, importId), eq(posImports.status, "draft")))
+      .returning({ fileName: posImports.fileName });
+    if (!rows.length) throw new UserError("Only a file that hasn't been imported can be discarded. Undo a posted import instead.");
+    return rows[0];
+  });
+}
+
 export async function deleteProfile(db: DB, scope: TenantScope, profileId: string) {
   requireImporter(scope);
   return withTenant(db, scope, async (tx) => {

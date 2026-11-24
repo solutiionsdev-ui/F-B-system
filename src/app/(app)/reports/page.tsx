@@ -206,7 +206,7 @@ export default async function ReportsPage({ searchParams }: { searchParams: Prom
           title="Collected per day"
           description="All payment methods, after refunds, in USD at each day's rate."
           actions={
-            <div className="flex items-center gap-4 text-xs text-stone-500">
+            <div className="flex items-center gap-4 font-mono text-[10.5px] uppercase tracking-[0.06em] text-stone-500">
               <span className="flex items-center gap-1.5">
                 <span className="h-0.5 w-4 rounded-full bg-brand-500" /> This period
               </span>
@@ -276,7 +276,7 @@ export default async function ReportsPage({ searchParams }: { searchParams: Prom
           <Card title="By location">
             <div className="-mx-5 -my-4 overflow-x-auto">
               <table className="w-full text-sm">
-                <thead className="border-y border-stone-100 bg-stone-50/60 text-left text-xs font-medium text-stone-500">
+                <thead className="border-y border-stone-100 bg-stone-50/60 text-left font-mono text-[10.5px] font-medium uppercase tracking-[0.06em] text-stone-400">
                   <tr>
                     <th className="px-5 py-2">Location</th>
                     <th className="px-3 py-2 text-right">Collected</th>
@@ -319,7 +319,7 @@ export default async function ReportsPage({ searchParams }: { searchParams: Prom
         ) : (
           <div className="-mx-5 -my-4 overflow-x-auto">
             <table className="w-full text-sm">
-              <thead className="border-y border-stone-100 bg-stone-50/60 text-left text-xs font-medium text-stone-500">
+              <thead className="border-y border-stone-100 bg-stone-50/60 text-left font-mono text-[10.5px] font-medium uppercase tracking-[0.06em] text-stone-400">
                 <tr>
                   <th className="px-5 py-2.5">Date</th>
                   <th className="px-3 py-2.5">Location</th>
@@ -427,7 +427,7 @@ function SalesCard({ r }: { r: PeriodReport }) {
       <div className="overflow-x-auto">
         <table className="w-full text-sm">
           <thead>
-            <tr className="text-right text-xs font-medium text-stone-500">
+            <tr className="text-right font-mono text-[10.5px] font-medium uppercase tracking-[0.06em] text-stone-400">
               <th />
               <th className="pb-2 font-medium">USD</th>
               <th className="pb-2 pl-3 font-medium">LBP</th>

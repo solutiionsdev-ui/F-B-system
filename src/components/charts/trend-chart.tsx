@@ -100,14 +100,14 @@ export function TrendChart({ points, height = 240 }: { points: TrendPoint[]; hei
         {ticks.map((t) => (
           <g key={t}>
             <line x1={m.left} x2={width - m.right} y1={y(t)} y2={y(t)} stroke={t === 0 ? AXIS : GRID} strokeWidth="1" />
-            <text x={m.left - 10} y={y(t)} dy="0.32em" textAnchor="end" fontSize="11" fill={MUTED} className="num">
+            <text x={m.left - 10} y={y(t)} dy="0.32em" textAnchor="end" fontSize="10.5" fill={MUTED} fontFamily="var(--font-geist-mono), monospace">
               {compactUsd(t)}
             </text>
           </g>
         ))}
         {points.map((p, i) =>
           (i % labelEvery === 0 && points.length - 1 - i >= labelEvery * 0.7) || i === points.length - 1 ? (
-            <text key={p.date} x={x(i)} y={height - 6} textAnchor={i === 0 ? "start" : i === points.length - 1 ? "end" : "middle"} fontSize="11" fill={MUTED}>
+            <text key={p.date} x={x(i)} y={height - 6} textAnchor={i === 0 ? "start" : i === points.length - 1 ? "end" : "middle"} fontSize="10.5" fill={MUTED} fontFamily="var(--font-geist-mono), monospace">
               {dayLabel(p.date)}
             </text>
           ) : null,
@@ -132,7 +132,7 @@ export function TrendChart({ points, height = 240 }: { points: TrendPoint[]; hei
           }}
           role="status"
         >
-          <div className="mb-2 font-medium text-stone-500">{dayLabel(hp.date, true)}</div>
+          <div className="mb-2 font-mono text-[10.5px] font-medium uppercase tracking-[0.06em] text-stone-400">{dayLabel(hp.date, true)}</div>
           <div className="flex items-center justify-between gap-2">
             <span className="flex items-center gap-1.5 text-stone-500">
               <span className="h-0.5 w-3 rounded-full" style={{ background: ACCENT }} /> This period

@@ -41,7 +41,7 @@ export function DrawerCard({ d }: { d: DayData }) {
     <Card title="Drawer check" description={c ? "Frozen when the day was closed." : "Updates as you enter sales, expenses and counts."}>
       <table className="w-full text-sm">
         <thead>
-          <tr className="text-right text-xs font-medium text-stone-500">
+          <tr className="text-right font-mono text-[10.5px] font-medium uppercase tracking-[0.06em] text-stone-400">
             <th />
             <th className="pb-2 font-medium">USD</th>
             <th className="pb-2 pl-3 font-medium">LBP</th>
@@ -110,7 +110,7 @@ export function DrawerCard({ d }: { d: DayData }) {
 export function CountCard({ d, canOperate }: { d: DayData; canOperate: boolean }) {
   if (!canOperate) return null;
   return (
-    <Card step={3} title="Count the drawer" description="Count each currency separately. Enter how many of each note.">
+    <Card id="count" step={3} title="Count the drawer" description="Count each currency separately. Enter how many of each note.">
       <details className="mb-5 rounded-lg border border-stone-200 px-3 py-2 text-sm" open={d.day.openingFloatUsd === 0n && d.day.openingFloatLbp === 0n}>
         <summary className="cursor-pointer font-medium text-stone-700">
           Opening float:{" "}
@@ -150,7 +150,7 @@ export function CountCard({ d, canOperate }: { d: DayData; canOperate: boolean }
             <div key={c}>
               <div className="mb-2 flex items-center justify-between">
                 <h3 className="text-sm font-semibold text-stone-800">{c}</h3>
-                {count && <span className="text-xs text-stone-500">Last saved {formatTime(count.countedAt)}</span>}
+                {count && <span className="font-mono text-[10.5px] uppercase tracking-[0.06em] text-stone-400">Saved {formatTime(count.countedAt)}</span>}
               </div>
               <CountForm
                 dayId={d.day.id}

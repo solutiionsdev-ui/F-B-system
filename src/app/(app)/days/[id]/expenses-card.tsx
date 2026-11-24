@@ -20,7 +20,7 @@ export function ExpensesCard({ d, canOperate }: { d: DayData; canOperate: boolea
       ) : (
         <div className="-mx-5 mb-4 overflow-x-auto border-b border-stone-100">
           <table className="w-full text-sm">
-            <thead className="border-y border-stone-100 bg-stone-50/60 text-left text-xs font-medium text-stone-500">
+            <thead className="border-y border-stone-100 bg-stone-50/60 text-left font-mono text-[10.5px] font-medium uppercase tracking-[0.06em] text-stone-400">
               <tr>
                 <th className="px-5 py-2">What</th>
                 <th className="px-3 py-2">Paid from</th>

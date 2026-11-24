@@ -71,7 +71,7 @@ function ValueTable({
   return (
     <div className="overflow-hidden rounded-lg border border-stone-200">
       <table className="w-full text-sm">
-        <thead className="border-y border-stone-100 bg-stone-50/60 text-left text-xs font-medium text-stone-500">
+        <thead className="border-y border-stone-100 bg-stone-50/60 text-left font-mono text-[10.5px] font-medium uppercase tracking-[0.06em] text-stone-400">
           <tr>
             <th className="px-3 py-1.5">In the file</th>
             <th className="px-3 py-1.5">Means</th>

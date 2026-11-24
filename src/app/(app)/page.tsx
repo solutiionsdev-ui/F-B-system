@@ -1,12 +1,14 @@
 import Link from "next/link";
 import type { ReactNode } from "react";
+import { HealthStrip } from "@/components/charts/health-strip";
 import { Sparkline } from "@/components/charts/sparkline";
 import { Icon } from "@/components/icons";
-import { Badge, buttonClass, Card, Delta, formatDate, formatTime, Money, REASON_LABELS, type Tone } from "@/components/ui";
+import { Badge, buttonClass, Card, Delta, formatDate, formatTime, microClass, Money, REASON_LABELS, type Tone } from "@/components/ui";
 import { formatRate } from "@/lib/money";
 import { requireContext } from "@/server/auth";
 import { getDb } from "@/server/db";
-import { getToday, greeting, type AttentionItem } from "@/server/today";
+import { getToday, greeting, type AttentionItem, type Insight } from "@/server/today";
+import { QuickActions } from "./quick-actions";
 
 function StatTile({ label, value, chip, sub, chart }: { label: string; value: ReactNode; chip?: ReactNode; sub?: ReactNode; chart?: ReactNode }) {
   return (
@@ -32,23 +34,59 @@ const ICON_TONE: Record<AttentionItem["tone"], string> = {
   info: "bg-sky-50 text-sky-600",
 };
 
-function AttentionRow({ item }: { item: AttentionItem }) {
+function AttentionRow({ item, orgName }: { item: AttentionItem; orgName: string }) {
   return (
-    <li>
-      <Link href={item.href} className="group flex items-start gap-3 px-5 py-3 transition-colors hover:bg-stone-50">
+    <li className="px-5 py-3.5">
+      <div className="flex items-start gap-3">
         <span className={`mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-full ${ICON_TONE[item.tone]}`}>
           <Icon name={item.icon} size={16} />
         </span>
-        <span className="min-w-0 flex-1">
-          <span className="block truncate text-sm font-semibold text-stone-900">{item.title}</span>
-          <span className="mt-0.5 block text-[13px] leading-5 text-stone-500">{item.detail}</span>
-          <span className="mt-1.5 block">
+        <div className="min-w-0 flex-1">
+          <div className="flex items-start justify-between gap-2">
+            <Link href={item.href} className="min-w-0 truncate text-sm font-semibold text-stone-900 hover:underline">
+              {item.title}
+            </Link>
             <Badge tone={item.tone as Tone}>{item.pill}</Badge>
-          </span>
-        </span>
-        <Icon name="arrow" size={16} className="mt-2 text-stone-300 transition-colors group-hover:text-stone-500" />
-      </Link>
+          </div>
+          <p className="mt-0.5 text-[13px] leading-5 text-stone-500">{item.detail}</p>
+          {item.actions.length > 0 && (
+            <div className="mt-2.5">
+              <QuickActions actions={item.actions} orgName={orgName} />
+            </div>
+          )}
+        </div>
+      </div>
     </li>
+  );
+}
+
+const INSIGHT_ICON: Record<Insight["tone"], string> = {
+  bad: "text-red-400",
+  good: "text-emerald-400",
+  accent: "text-brand-300",
+  neutral: "text-stone-300",
+};
+
+function Insights({ items }: { items: Insight[] }) {
+  if (items.length === 0) return null;
+  return (
+    <section className="mb-8 divide-y divide-stone-100 rounded-2xl border border-stone-200/80 bg-white shadow-[0_1px_2px_rgba(28,25,23,0.04)]">
+      {items.map((i) => (
+        <div key={i.key} className="flex flex-wrap items-center gap-x-4 gap-y-3 px-4 py-3.5 sm:flex-nowrap">
+          <span className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-ink ${INSIGHT_ICON[i.tone]}`}>
+            <Icon name={i.icon} size={16} />
+          </span>
+          <p className="min-w-0 flex-1 text-sm leading-5 text-stone-600">
+            <span className="font-semibold text-stone-900">{i.lead}</span> {i.text}
+          </p>
+          {i.action && (
+            <Link href={i.action.href} className={`${buttonClass("primary")} rounded-full px-3.5 py-1.5 text-[13px]`}>
+              {i.action.label} <span aria-hidden>→</span>
+            </Link>
+          )}
+        </div>
+      ))}
+    </section>
   );
 }
 
@@ -88,7 +126,7 @@ export default async function TodayPage() {
         )}
       </div>
 
-      <div className="mb-8 grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+      <div className="mb-4 grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
         <StatTile
           label="Collected today"
           value={<Money minor={kpis.collected.value} currency="USD" />}
@@ -134,6 +172,8 @@ export default async function TodayPage() {
         </Link>
       </div>
 
+      <Insights items={data.insights} />
+
       <div className="grid items-start gap-6 lg:grid-cols-[minmax(0,1fr)_360px]">
         <div className="min-w-0 space-y-6">
           <section>
@@ -173,6 +213,9 @@ export default async function TodayPage() {
                       )}
                     </div>
                     <div className="mt-4">
+                      <HealthStrip ticks={data.health[loc.id] ?? []} />
+                    </div>
+                    <div className="mt-4">
                       {!day && canOperate && (
                         <Link href={`/days/new?location=${loc.id}`} className={buttonClass("secondary")}>
                           Open today
@@ -196,7 +239,7 @@ export default async function TodayPage() {
             ) : (
               <div className="-mx-5 -my-4 overflow-x-auto">
                 <table className="w-full text-sm">
-                  <thead className="border-y border-stone-100 bg-stone-50/60 text-left text-xs font-medium text-stone-500">
+                  <thead className="border-y border-stone-100 bg-stone-50/60 text-left font-mono text-[10.5px] font-medium uppercase tracking-[0.06em] text-stone-400">
                     <tr>
                       <th className="px-5 py-2.5">Date</th>
                       <th className="px-3 py-2.5">Location</th>
@@ -248,7 +291,7 @@ export default async function TodayPage() {
                 <span className="num rounded-full bg-ink px-2 py-0.5 text-[11px] font-semibold text-white">{needCount}</span>
               )}
             </div>
-            <span className="text-xs text-stone-400">Most urgent first</span>
+            <span className={microClass}>Most urgent first</span>
           </header>
           {needCount === 0 ? (
             <div className="flex items-center gap-3 px-5 py-4 text-sm text-stone-600">
@@ -260,16 +303,16 @@ export default async function TodayPage() {
           ) : (
             <ul className="divide-y divide-stone-100">
               {data.needs.map((i) => (
-                <AttentionRow key={i.key} item={i} />
+                <AttentionRow key={i.key} item={i} orgName={dash.org.name} />
               ))}
             </ul>
           )}
           {data.info.length > 0 ? (
             <>
-              <div className="border-t border-stone-100 px-5 pb-1 pt-4 text-xs font-medium text-stone-400">For your information</div>
+              <div className={`border-t border-stone-100 px-5 pb-1 pt-4 ${microClass}`}>For your information</div>
               <ul className="divide-y divide-stone-100 pb-2">
                 {data.info.map((i) => (
-                  <AttentionRow key={i.key} item={i} />
+                  <AttentionRow key={i.key} item={i} orgName={dash.org.name} />
                 ))}
               </ul>
             </>

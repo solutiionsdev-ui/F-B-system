@@ -90,7 +90,7 @@ export function CashCalendar({ days, toleranceCents }: { days: CalendarDay[]; to
       <div className="relative" data-calendar>
         <div className="grid max-w-[420px] grid-cols-7 gap-1.5 text-center">
           {["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"].map((l) => (
-            <div key={l} className="pb-1 text-[11px] font-medium text-stone-400">
+            <div key={l} className="pb-1 font-mono text-[10px] font-medium uppercase tracking-[0.06em] text-stone-400">
               {l}
             </div>
           ))}
@@ -119,7 +119,7 @@ export function CashCalendar({ days, toleranceCents }: { days: CalendarDay[]; to
         </div>
       )}
 
-      <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-2 text-[11px] text-stone-500">
+      <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-2 font-mono text-[10px] uppercase tracking-[0.06em] text-stone-500">
         <span className="flex items-center gap-1.5">
           Short
           {[...SHORT].reverse().map((c) => (
@@ -149,7 +149,7 @@ export function CashCalendar({ days, toleranceCents }: { days: CalendarDay[]; to
     <div className="relative" data-calendar>
       <div className="overflow-x-auto pb-1">
         <div className="inline-flex gap-2">
-          <div className="flex flex-col pt-5 text-[10px] text-stone-400" style={{ gap }}>
+          <div className="flex flex-col pt-5 font-mono text-[10px] uppercase text-stone-400" style={{ gap }}>
             {["Mon", "", "Wed", "", "Fri", "", "Sun"].map((l, i) => (
               <div key={i} style={{ height: size, lineHeight: `${size}px` }}>
                 {l}
@@ -157,7 +157,7 @@ export function CashCalendar({ days, toleranceCents }: { days: CalendarDay[]; to
             ))}
           </div>
           <div>
-            <div className="relative h-5 text-[10px] text-stone-400">
+            <div className="relative h-5 font-mono text-[10px] uppercase text-stone-400">
               {months.map((mo) => (
                 <span key={`${mo.col}-${mo.label}`} className="absolute" style={{ left: mo.col * (size + gap) }}>
                   {mo.label}
@@ -197,7 +197,7 @@ export function CashCalendar({ days, toleranceCents }: { days: CalendarDay[]; to
         </div>
       )}
 
-      <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-2 text-[11px] text-stone-500">
+      <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-2 font-mono text-[10px] uppercase tracking-[0.06em] text-stone-500">
         <span className="flex items-center gap-1.5">
           Short
           {[...SHORT].reverse().map((c) => (

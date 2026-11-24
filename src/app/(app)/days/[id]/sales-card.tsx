@@ -69,7 +69,7 @@ export function SalesCard({ d, canOperate: canEdit }: { d: DayData; canOperate: 
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
               <thead>
-                <tr className="text-left text-xs font-medium text-stone-500">
+                <tr className="text-left font-mono text-[10.5px] font-medium uppercase tracking-[0.06em] text-stone-400">
                   <th className="pb-2 pr-3 font-medium">Line</th>
                   <th className="w-36 pb-2 pr-2 text-right font-medium">USD</th>
                   <th className="w-40 pb-2 text-right font-medium">LBP</th>
