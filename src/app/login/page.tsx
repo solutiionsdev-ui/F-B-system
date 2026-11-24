@@ -1,10 +1,11 @@
 import { redirect } from "next/navigation";
-import { getContext } from "@/server/auth";
+import { getContext, isDemoMode } from "@/server/auth";
 import { LoginForm } from "./login-form";
 
 export const metadata = { title: "Sign in · Cash Control" };
 
 export default async function LoginPage() {
+  if (isDemoMode()) redirect("/auth/demo");
   if (await getContext()) redirect("/");
   return (
     <main className="flex flex-1 items-center justify-center px-4 py-16">

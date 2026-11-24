@@ -8,7 +8,7 @@ import type { DB } from "@/db/database";
 import type { Currency, PaidFrom, VarianceReason } from "@/db/schema";
 import type { ActionState } from "@/lib/action-state";
 import { MoneyError, parseAmount, parseOptionalAmount, type Pair } from "@/lib/money";
-import { requireContext, setActiveOrg, signIn, signOut, type AppContext } from "@/server/auth";
+import { createSession, requireContext, setActiveOrg, signIn, signOut, type AppContext } from "@/server/auth";
 import { getDb } from "@/server/db";
 import {
   addAdjustment,
@@ -24,6 +24,17 @@ import {
   voidExpense,
   type SalesTotalsInput,
 } from "@/server/operations";
+import {
+  acceptInvite,
+  addLocation,
+  changeRole,
+  createInvite,
+  removeMember,
+  renameLocation,
+  renewInvite,
+  revokeInvite,
+  updateSettings,
+} from "@/server/team";
 
 function pgError(e: unknown): { code?: string; message?: string } {
   let cur = e as { code?: string; message?: string; cause?: unknown } | undefined;
@@ -270,4 +281,83 @@ export async function addAdjustmentAction(_: ActionState, fd: FormData) {
     [`/days/${dayId}`],
     "Adjustment posted",
   );
+}
+
+// ---------------------------------------------------------------- team
+
+export async function addLocationAction(_: ActionState, fd: FormData) {
+  return run((ctx, db) => addLocation(db, ctx.scope, str(fd, "name")), ["/team", "/"], "Location added");
+}
+
+export async function renameLocationAction(_: ActionState, fd: FormData) {
+  return run(
+    (ctx, db) => renameLocation(db, ctx.scope, str(fd, "locationId"), str(fd, "name")),
+    ["/team", "/"],
+    "Renamed",
+  );
+}
+
+/** Invite actions return the link path so the page can show it once to copy. */
+async function inviteResult(
+  fn: (ctx: AppContext, db: DB) => Promise<{ token: string; email: string }>,
+  ok: string,
+): Promise<ActionState> {
+  const ctx = await requireContext();
+  const db = await getDb();
+  try {
+    const { token, email } = await fn(ctx, db);
+    revalidatePath("/team");
+    return { ok, at: Date.now(), data: { path: `/invite/${token}`, email } };
+  } catch (e) {
+    return { error: toMessage(e) };
+  }
+}
+
+export async function createInviteAction(_: ActionState, fd: FormData) {
+  return inviteResult(
+    (ctx, db) => createInvite(db, ctx.scope, { email: str(fd, "email"), role: str(fd, "role") }),
+    "Invitation created",
+  );
+}
+
+export async function renewInviteAction(_: ActionState, fd: FormData) {
+  return inviteResult((ctx, db) => renewInvite(db, ctx.scope, str(fd, "inviteId")), "New link created");
+}
+
+export async function revokeInviteAction(_: ActionState, fd: FormData) {
+  return run((ctx, db) => revokeInvite(db, ctx.scope, str(fd, "inviteId")), ["/team"], "Invitation cancelled");
+}
+
+export async function changeRoleAction(_: ActionState, fd: FormData) {
+  return run(
+    (ctx, db) => changeRole(db, ctx.scope, str(fd, "membershipId"), str(fd, "role")),
+    ["/team"],
+    "Role updated",
+  );
+}
+
+export async function removeMemberAction(_: ActionState, fd: FormData) {
+  return run((ctx, db) => removeMember(db, ctx.scope, str(fd, "membershipId")), ["/team"], "Removed from the team");
+}
+
+export async function updateSettingsAction(_: ActionState, fd: FormData) {
+  return run(
+    (ctx, db) => updateSettings(db, ctx.scope, { name: str(fd, "name"), tolerance: str(fd, "tolerance") }),
+    ["/team", "/"],
+    "Settings saved",
+  );
+}
+
+/** Public: the person opening an invite link. Signs them in once they join. */
+export async function acceptInviteAction(token: string, _: ActionState, fd: FormData): Promise<ActionState> {
+  const db = await getDb();
+  let joined: { userId: string; orgId: string };
+  try {
+    joined = await acceptInvite(db, token, { name: str(fd, "name"), password: String(fd.get("password") ?? "") });
+  } catch (e) {
+    return { error: toMessage(e) };
+  }
+  await signOut();
+  await createSession(joined.userId, joined.orgId);
+  redirect("/");
 }

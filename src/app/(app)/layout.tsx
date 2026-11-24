@@ -2,13 +2,16 @@ import Link from "next/link";
 import type { ReactNode } from "react";
 import { logoutAction } from "@/app/actions";
 import { buttonClass } from "@/components/ui";
-import { requireContext } from "@/server/auth";
+import { isDemoMode, listDemoUsers, requireContext } from "@/server/auth";
 import { OrgSwitcher } from "./org-switcher";
+import { UserSwitcher } from "./user-switcher";
 
 const ROLE_LABEL = { owner: "Owner", manager: "Manager", accountant: "Accountant" } as const;
 
 export default async function AppLayout({ children }: { children: ReactNode }) {
   const ctx = await requireContext();
+  const demo = isDemoMode();
+  const demoUsers = demo ? await listDemoUsers() : [];
   const role = ctx.active.role;
   const links = [
     { href: "/", label: "Today" },
@@ -19,6 +22,7 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
           { href: "/audit", label: "Audit trail" },
         ]
       : []),
+    ...(role === "owner" ? [{ href: "/team", label: "Team" }] : []),
     ...(ctx.memberships.length > 1 ? [{ href: "/clients", label: "All clients" }] : []),
   ];
   return (
@@ -41,12 +45,18 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
               active={ctx.active.orgId}
               options={ctx.memberships.map((m) => ({ id: m.orgId, label: m.orgName }))}
             />
-            <span className="hidden text-stone-500 md:inline">
-              {ctx.user.name} · {ROLE_LABEL[role]}
-            </span>
-            <form action={logoutAction}>
-              <button className={buttonClass("ghost")}>Sign out</button>
-            </form>
+            {demo ? (
+              <UserSwitcher current={ctx.user.id} users={demoUsers} />
+            ) : (
+              <>
+                <span className="hidden text-stone-500 md:inline">
+                  {ctx.user.name} · {ROLE_LABEL[role]}
+                </span>
+                <form action={logoutAction}>
+                  <button className={buttonClass("ghost")}>Sign out</button>
+                </form>
+              </>
+            )}
           </div>
         </div>
       </header>

@@ -208,3 +208,17 @@ export const auditLog = pgTable("audit_log", {
   newData: jsonb("new_data"),
   at: ts("at").notNull().defaultNow(),
 });
+
+export const invitations = pgTable("invitations", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  orgId: uuid("org_id").notNull(),
+  email: text("email").notNull(),
+  role: text("role").$type<Role>().notNull(),
+  tokenHash: text("token_hash").notNull(),
+  expiresAt: ts("expires_at").notNull(),
+  createdBy: uuid("created_by"),
+  createdAt: ts("created_at").notNull().defaultNow(),
+  acceptedAt: ts("accepted_at"),
+  acceptedBy: uuid("accepted_by"),
+  revokedAt: ts("revoked_at"),
+});

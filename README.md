@@ -11,7 +11,16 @@ npm install
 npm run dev
 ```
 
-Open http://localhost:3000. No database install is needed: locally the app
+Open http://localhost:3000. There's no login screen in development: the app
+runs in **demo mode** and signs you in as the demo owner. Use the "Viewing as"
+picker in the header to switch to the manager or accountant and see what each
+role can do.
+
+To bring the login screen back, set `DEMO_MODE=false`. Production builds have
+the login on unless `DEMO_MODE=true` is set on purpose, so never set it on a
+server with real data.
+
+No database install is needed: locally the app
 runs PGlite (real Postgres compiled to WebAssembly) and stores data in
 `.data/pglite`. On first start it creates the tables and loads demo data.
 
@@ -19,7 +28,9 @@ To start over with fresh demo data, stop the server and delete `.data/`.
 
 ### Demo logins
 
-All demo users share the password `pilot-demo-2027`.
+Only needed with the login screen on (`DEMO_MODE=false`), or when accepting
+an invite with an existing demo account. All demo users share the password
+`pilot-demo-2027`.
 
 | Email | Role | Sees |
 | --- | --- | --- |
@@ -38,7 +49,7 @@ left open so you can count and close it.
 npm test
 ```
 
-46 tests. The database tests run the real migrations and check the business
+62 tests. The database tests run the real migrations and check the business
 plan's guarantees against Postgres itself: one group can't see or write
 another's data, accountants can't record expenses, closed days are locked,
 rates and the audit log can't be rewritten, past days keep their exchange
@@ -67,6 +78,27 @@ Net profit is deliberately withheld, as the business plan requires, until
 unit costs are verified. "Collected minus expenses" is shown as a cash view
 and labelled as not being profit.
 
+## Team and locations
+
+Owners get a **Team** page:
+
+- **People**: change someone's role or remove them. You can't change or remove
+  yourself, and the database refuses any change that would leave a group with
+  no owner.
+- **Invitations**: enter an email and a role to get a private link to send by
+  WhatsApp or email. It works once and expires after 7 days. A new person picks
+  a name and password; someone who already has an account (for example an
+  accountant with several clients) enters their existing password. "New link"
+  replaces a lost link; "Cancel invite" kills it. Only a hash of the link is
+  stored.
+- **Locations**: add and rename.
+- **Settings**: the group name and the cash tolerance used at closing.
+
+Plan allowances from the pricing table are enforced: Single location (1
+location, 5 users), Multi-branch (3 locations, 15 users), Enterprise
+(unlimited). Pending invitations count towards the user allowance. Plans
+are changed by us, not from the app (billing is manual for now).
+
 ## How it's built
 
 | Piece | Where |
@@ -77,6 +109,7 @@ and labelled as not being profit.
 | Row-level security, locks, audit trigger | `src/db/migrations/0002_security.ts` |
 | Business operations (framework-free) | `src/server/operations.ts` |
 | Period reports, CSV and PDF | `src/server/reports.ts`, `report-csv.ts`, `report-pdf.ts` |
+| Team, invitations, locations, settings | `src/server/team.ts`, `src/db/migrations/0003_team.ts` |
 | Sessions and the current restaurant group | `src/server/auth.ts` |
 | Screens | `src/app/(app)/` |
 
@@ -102,6 +135,5 @@ through the transaction pooler; the app turns off prepared statements for that.
 ## Not built yet (next steps toward the pilot)
 
 - POS export import (needs real export files from the pilot restaurants)
-- Team management screens (invite users, add locations)
 - Petty cash fund balance tracking
 - Hosted deployment

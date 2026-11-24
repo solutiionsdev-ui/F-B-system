@@ -1,5 +1,4 @@
 import "server-only";
-import { createHash, randomBytes } from "node:crypto";
 import { cache } from "react";
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
@@ -7,12 +6,23 @@ import { and, asc, eq, gt } from "drizzle-orm";
 import { memberships, organizations, sessions, users, type Role } from "@/db/schema";
 import type { TenantScope } from "@/db/database";
 import { verifyPassword } from "@/lib/password";
+import { hashToken, newToken } from "@/lib/tokens";
 import { getDb } from "./db";
 
 const COOKIE = "fnb_session";
 const SESSION_DAYS = 7;
 
-const hashToken = (token: string) => createHash("sha256").update(token).digest("hex");
+/**
+ * Demo mode skips the login screen: everyone is signed in automatically and
+ * can switch between users from the header. On by default in development;
+ * in production it's off unless DEMO_MODE=true is set deliberately.
+ * Set DEMO_MODE=false to bring the login screen back.
+ */
+export function isDemoMode() {
+  if (process.env.DEMO_MODE === "true") return true;
+  if (process.env.DEMO_MODE === "false") return false;
+  return process.env.NODE_ENV !== "production";
+}
 
 export type Membership = { orgId: string; orgName: string; role: Role };
 export type AppContext = {
@@ -32,9 +42,16 @@ export async function signIn(email: string, password: string): Promise<boolean> 
     user?.passwordHash ?? "scrypt$16384$8$1$AAAAAAAAAAAAAAAAAAAAAA$AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
   );
   if (!user || !ok) return false;
-  const token = randomBytes(32).toString("base64url");
+  await createSession(user.id);
+  return true;
+}
+
+/** Starts a session for a user and sets the cookie (Server Actions and Route Handlers only). */
+export async function createSession(userId: string, activeOrgId?: string) {
+  const db = await getDb();
+  const token = newToken();
   const expiresAt = new Date(Date.now() + SESSION_DAYS * 86_400_000);
-  await db.insert(sessions).values({ id: hashToken(token), userId: user.id, expiresAt });
+  await db.insert(sessions).values({ id: hashToken(token), userId, activeOrgId: activeOrgId ?? null, expiresAt });
   (await cookies()).set(COOKIE, token, {
     httpOnly: true,
     sameSite: "lax",
@@ -42,7 +59,26 @@ export async function signIn(email: string, password: string): Promise<boolean> 
     path: "/",
     expires: expiresAt,
   });
-  return true;
+}
+
+/** Everyone who can be picked in demo mode's "Viewing as" switcher. */
+export async function listDemoUsers() {
+  if (!isDemoMode()) return [];
+  const db = await getDb();
+  return db.select({ id: users.id, name: users.name, email: users.email }).from(users).orderBy(asc(users.name));
+}
+
+/** The user demo mode signs in as by default: the first owner. */
+export async function defaultDemoUserId(): Promise<string | null> {
+  const db = await getDb();
+  const [owner] = await db
+    .select({ id: users.id })
+    .from(users)
+    .innerJoin(memberships, eq(memberships.userId, users.id))
+    .where(eq(memberships.role, "owner"))
+    .orderBy(asc(users.createdAt))
+    .limit(1);
+  return owner?.id ?? null;
 }
 
 export async function signOut() {
@@ -85,7 +121,7 @@ export const getContext = cache(async (): Promise<AppContext | null> => {
 
 export async function requireContext(): Promise<AppContext> {
   const ctx = await getContext();
-  if (!ctx) redirect("/login");
+  if (!ctx) redirect(isDemoMode() ? "/auth/demo" : "/login");
   return ctx;
 }
 
