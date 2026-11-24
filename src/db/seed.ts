@@ -1,7 +1,7 @@
 // Demo data for local development and pilot demos: two fictional restaurant
 // groups, a week of closed days, and one open day ready to close.
 // Logins are listed in README.md. Never run this against production.
-import { count } from "drizzle-orm";
+import { count, sql } from "drizzle-orm";
 import type { Database, DB, TenantScope } from "./database";
 import {
   exchangeRates,
@@ -168,7 +168,8 @@ async function simulateDay(db: DB, scope: TenantScope, locationId: string, categ
   return day.id;
 }
 
-export async function seedDemo(db: DB) {
+/** Groups, people, locations, categories and the first rates. Runs in one transaction. */
+async function seedBase(db: DB) {
   const passwordHash = await hashPassword(DEMO_PASSWORD);
   const [cafe, bistro] = await db
     .insert(organizations)
@@ -218,6 +219,14 @@ export async function seedDemo(db: DB) {
     { orgId: bistro.id, lbpPerUsd: "89000.0000", source: "custom", note: "House rate", createdBy: owner2.id, effectiveAt: monthAgo },
   ]);
 
+  return { cafe, bistro, owner, manager, owner2, hamra, gemmayzeh, marMikhael, cafeCats, bistroCats };
+}
+
+type SeedBase = Awaited<ReturnType<typeof seedBase>>;
+
+/** A week of history, through the same operations the app uses. */
+async function seedHistory(db: DB, b: SeedBase) {
+  const { cafe, bistro, owner, manager, owner2, hamra, gemmayzeh, marMikhael, cafeCats, bistroCats } = b;
   const today = todayIn();
   const cafeScope: TenantScope = { orgId: cafe.id, userId: manager.id, role: "manager" };
   const bistroScope: TenantScope = { orgId: bistro.id, userId: owner2.id, role: "owner" };
@@ -254,9 +263,23 @@ export async function seedDemo(db: DB) {
   await simulateDay(db, cafeScope, hamra.id, cafeCats, { date: today, close: false }, 999);
 }
 
+export async function seedDemo(db: DB) {
+  const base = await db.transaction((tx) => seedBase(tx as unknown as DB));
+  await seedHistory(db, base);
+}
+
+/**
+ * Seeds only an empty database. The check and the first inserts happen under
+ * an advisory lock, so two servers starting together can't both seed.
+ */
 export async function seedIfEmpty(database: Database): Promise<boolean> {
-  const [{ value }] = await database.db.select({ value: count() }).from(organizations);
-  if (value > 0) return false;
-  await seedDemo(database.db);
+  const base = await database.db.transaction(async (tx) => {
+    await tx.execute(sql`select pg_advisory_xact_lock(727101)`);
+    const [{ value }] = await tx.select({ value: count() }).from(organizations);
+    if (value > 0) return null;
+    return seedBase(tx as unknown as DB);
+  });
+  if (!base) return false;
+  await seedHistory(database.db, base);
   return true;
 }

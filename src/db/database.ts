@@ -1,7 +1,7 @@
 // Opens the database. Locally it runs PGlite (real Postgres compiled to
 // WebAssembly, stored in .data/pglite) so no install is needed. In production
-// set DATABASE_URL to any Postgres 15+ (Supabase, Neon, RDS...).
-import { PGlite } from "@electric-sql/pglite";
+// set DATABASE_URL to any Postgres 15+ (Neon, Supabase, RDS...).
+import type { PGlite } from "@electric-sql/pglite";
 import { drizzle as drizzlePglite, type PgliteDatabase } from "drizzle-orm/pglite";
 import { drizzle as drizzlePostgres } from "drizzle-orm/postgres-js";
 import { sql } from "drizzle-orm";
@@ -12,16 +12,27 @@ import type { Role } from "./schema";
 export type DB = PgliteDatabase<typeof schema>;
 export type Tx = Parameters<Parameters<DB["transaction"]>[0]>[0];
 
-export type Database = {
-  db: DB;
+type RawTx = {
   /** Runs one or more SQL statements with no parameters (migrations only). */
   exec(statements: string): Promise<void>;
   query<T>(statement: string): Promise<T[]>;
+};
+
+export type Database = RawTx & {
+  db: DB;
+  /** Runs raw statements inside one transaction (migrations only). */
+  inTransaction<T>(fn: (tx: RawTx) => Promise<T>): Promise<T>;
   close(): Promise<void>;
 };
 
-export async function openPglite(dataDir?: string): Promise<Database> {
-  const client = new PGlite(dataDir);
+/** Pass an existing PGlite to run as a particular role (tests), or a data dir. */
+export async function openPglite(dataDirOrClient?: string | PGlite): Promise<Database> {
+  let client: PGlite;
+  if (typeof dataDirOrClient === "object") client = dataDirOrClient;
+  else {
+    const { PGlite } = await import("@electric-sql/pglite");
+    client = new PGlite(dataDirOrClient);
+  }
   await client.waitReady;
   return {
     db: drizzlePglite(client, { schema }),
@@ -29,36 +40,63 @@ export async function openPglite(dataDir?: string): Promise<Database> {
       await client.exec(s);
     },
     query: async <T,>(s: string) => (await client.query<T>(s)).rows,
+    inTransaction: (fn) =>
+      client.transaction((tx) =>
+        fn({
+          exec: async (s) => {
+            await tx.exec(s);
+          },
+          query: async <T,>(s: string) => (await tx.query<T>(s)).rows,
+        }),
+      ),
     close: () => client.close(),
   };
 }
 
 export async function openPostgres(url: string): Promise<Database> {
   const postgres = (await import("postgres")).default;
-  // prepare: false keeps it compatible with transaction-mode poolers (Supabase, PgBouncer).
-  const client = postgres(url, { prepare: false });
+  // prepare: false keeps it compatible with transaction-mode poolers (Neon, Supabase, PgBouncer).
+  // A small pool per server instance; the provider's pooler fans out.
+  const client = postgres(url, { prepare: false, max: 5, idle_timeout: 20, connect_timeout: 15 });
   return {
     db: drizzlePostgres(client, { schema }) as unknown as DB,
     exec: async (s) => {
       await client.unsafe(s);
     },
     query: async <T,>(s: string) => (await client.unsafe(s)) as unknown as T[],
+    inTransaction: <T,>(fn: (tx: RawTx) => Promise<T>) =>
+      client.begin((t) =>
+        fn({
+          exec: async (s) => {
+            await t.unsafe(s);
+          },
+          query: async <U,>(s: string) => (await t.unsafe(s)) as unknown as U[],
+        }),
+      ) as Promise<T>,
     close: () => client.end(),
   };
 }
 
+/**
+ * Applies pending migrations in one transaction, holding an advisory lock so
+ * two servers starting at the same moment can't both run them.
+ */
 export async function migrate(database: Database): Promise<string[]> {
-  await database.exec(
-    "create table if not exists _migrations (id text primary key, applied_at timestamptz not null default now())",
-  );
-  const done = new Set((await database.query<{ id: string }>("select id from _migrations")).map((r) => r.id));
-  const applied: string[] = [];
-  for (const m of migrations) {
-    if (done.has(m.id)) continue;
-    await database.exec(`begin;\n${m.sql}\ninsert into _migrations (id) values ('${m.id}');\ncommit;`);
-    applied.push(m.id);
-  }
-  return applied;
+  return database.inTransaction(async (tx) => {
+    await tx.exec("select pg_advisory_xact_lock(727100)");
+    await tx.exec(
+      "create table if not exists _migrations (id text primary key, applied_at timestamptz not null default now())",
+    );
+    const done = new Set((await tx.query<{ id: string }>("select id from _migrations")).map((r) => r.id));
+    const applied: string[] = [];
+    for (const m of migrations) {
+      if (done.has(m.id)) continue;
+      await tx.exec(m.sql);
+      await tx.exec(`insert into _migrations (id) values ('${m.id}')`);
+      applied.push(m.id);
+    }
+    return applied;
+  });
 }
 
 export type TenantScope = { orgId: string; userId: string; role: Role };
