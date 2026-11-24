@@ -1,4 +1,4 @@
-import { addAdjustmentAction, closeDayAction } from "@/app/actions";
+import { addAdjustmentAction, closeDayAction, setOpeningFloatAction } from "@/app/actions";
 import { ActionForm } from "@/components/action-form";
 import { CountForm } from "@/components/count-form";
 import { Badge, Card, Field, formatTime, inputClass, Money, REASON_LABELS } from "@/components/ui";
@@ -111,6 +111,38 @@ export function CountCard({ d, canOperate }: { d: DayData; canOperate: boolean }
   if (!canOperate) return null;
   return (
     <Card step={3} title="Count the drawer" description="Count each currency separately. Enter how many of each note.">
+      <details className="mb-5 rounded-lg border border-stone-200 px-3 py-2 text-sm" open={d.day.openingFloatUsd === 0n && d.day.openingFloatLbp === 0n}>
+        <summary className="cursor-pointer font-medium text-stone-700">
+          Opening float:{" "}
+          <span className="num font-normal text-stone-600">
+            {formatAmount(d.day.openingFloatUsd, "USD")} + {formatAmount(d.day.openingFloatLbp, "LBP")}
+          </span>
+        </summary>
+        <ActionForm action={setOpeningFloatAction} submitLabel="Save float" variant="secondary" className="mt-3 space-y-3">
+          <input type="hidden" name="dayId" value={d.day.id} />
+          <p className="text-xs text-stone-500">The cash that was in the drawer before the first sale.</p>
+          <div className="grid grid-cols-2 gap-2">
+            <Field label="USD">
+              <input
+                name="float_USD"
+                inputMode="decimal"
+                defaultValue={d.day.openingFloatUsd ? toInputValue(d.day.openingFloatUsd, "USD") : ""}
+                placeholder="0.00"
+                className={`${inputClass} num text-right`}
+              />
+            </Field>
+            <Field label="LBP">
+              <input
+                name="float_LBP"
+                inputMode="decimal"
+                defaultValue={d.day.openingFloatLbp ? toInputValue(d.day.openingFloatLbp, "LBP") : ""}
+                placeholder="0"
+                className={`${inputClass} num text-right`}
+              />
+            </Field>
+          </div>
+        </ActionForm>
+      </details>
       <div className="space-y-6">
         {CURRENCIES.map((c) => {
           const count = d.counts[c];

@@ -19,6 +19,7 @@ import {
   openDay,
   saveCount,
   saveManualSales,
+  setOpeningFloat,
   setRate,
   UserError,
   voidExpense,
@@ -35,6 +36,15 @@ import {
   revokeInvite,
   updateSettings,
 } from "@/server/team";
+import {
+  applyProfile,
+  createImportDraft,
+  deleteProfile,
+  mappingFromForm,
+  postImport,
+  saveMapping,
+  undoImport,
+} from "@/server/pos-import";
 
 function pgError(e: unknown): { code?: string; message?: string } {
   let cur = e as { code?: string; message?: string; cause?: unknown } | undefined;
@@ -143,6 +153,19 @@ export async function openDayAction(_: ActionState, fd: FormData): Promise<Actio
   }
   revalidatePath("/");
   redirect(`/days/${id}`);
+}
+
+export async function setOpeningFloatAction(_: ActionState, fd: FormData) {
+  const dayId = str(fd, "dayId");
+  return run(
+    (ctx, db) =>
+      setOpeningFloat(db, ctx.scope, dayId, {
+        USD: field(fd, "float_USD", "USD", "Opening float (USD)"),
+        LBP: field(fd, "float_LBP", "LBP", "Opening float (LBP)"),
+      }),
+    [`/days/${dayId}`],
+    "Opening float saved",
+  );
 }
 
 const SALES_FIELDS: { key: keyof SalesTotalsInput; label: string }[] = [
@@ -360,4 +383,52 @@ export async function acceptInviteAction(token: string, _: ActionState, fd: Form
   await signOut();
   await createSession(joined.userId, joined.orgId);
   redirect("/");
+}
+
+// ---------------------------------------------------------------- POS import
+
+export async function uploadImportAction(_: ActionState, fd: FormData): Promise<ActionState> {
+  const ctx = await requireContext();
+  const db = await getDb();
+  const file = fd.get("file");
+  if (!(file instanceof File) || file.size === 0) return { error: "Choose a CSV or Excel file to upload." };
+  let id: string;
+  try {
+    id = await createImportDraft(db, ctx.scope, {
+      locationId: str(fd, "locationId"),
+      fileName: file.name,
+      bytes: new Uint8Array(await file.arrayBuffer()),
+    });
+  } catch (e) {
+    return { error: toMessage(e) };
+  }
+  redirect(`/import/${id}`);
+}
+
+export async function saveMappingAction(importId: string, _: ActionState, fd: FormData) {
+  return run((ctx, db) => saveMapping(db, ctx.scope, importId, mappingFromForm(fd)), [`/import/${importId}`], "Preview updated");
+}
+
+export async function applyProfileAction(importId: string, _: ActionState, fd: FormData) {
+  return run((ctx, db) => applyProfile(db, ctx.scope, importId, str(fd, "profileId")), [`/import/${importId}`], "Format applied");
+}
+
+export async function postImportAction(importId: string, _: ActionState, fd: FormData) {
+  return run(
+    (ctx, db) =>
+      postImport(db, ctx.scope, importId, {
+        createMissingDays: fd.get("createMissingDays") === "on",
+        saveAs: str(fd, "saveAs") || null,
+      }),
+    [`/import/${importId}`, "/import", "/"],
+    "Imported",
+  );
+}
+
+export async function undoImportAction(importId: string) {
+  return run((ctx, db) => undoImport(db, ctx.scope, importId), [`/import/${importId}`, "/import", "/"], "Import undone");
+}
+
+export async function deleteProfileAction(_: ActionState, fd: FormData) {
+  return run((ctx, db) => deleteProfile(db, ctx.scope, str(fd, "profileId")), ["/import"], "Format deleted");
 }

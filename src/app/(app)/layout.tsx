@@ -16,6 +16,7 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
   const links = [
     { href: "/", label: "Today" },
     { href: "/rates", label: "Exchange rate" },
+    { href: "/import", label: "POS import" },
     ...(role === "owner" || role === "accountant"
       ? [
           { href: "/reports", label: "Reports" },

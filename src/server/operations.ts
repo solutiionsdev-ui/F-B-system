@@ -142,6 +142,19 @@ export async function openDay(
   });
 }
 
+/** Corrects the cash the drawer started with (e.g. a day opened by a POS import). */
+export async function setOpeningFloat(db: DB, scope: TenantScope, dayId: string, float: Pair) {
+  requireRole(scope, OPS, "change the opening float");
+  if (float.USD < 0n || float.LBP < 0n) throw new UserError("The opening float can't be negative.");
+  return withTenant(db, scope, async (tx) => {
+    const day = await loadOpenDay(tx, dayId);
+    await tx
+      .update(businessDays)
+      .set({ openingFloatUsd: float.USD, openingFloatLbp: float.LBP })
+      .where(eq(businessDays.id, day.id));
+  });
+}
+
 export type SalesTotalsInput = {
   cash: Pair;
   card: Pair;
@@ -158,6 +171,14 @@ export async function saveManualSales(db: DB, scope: TenantScope, dayId: string,
   requireRole(scope, OPS, "enter sales");
   return withTenant(db, scope, async (tx) => {
     const day = await loadOpenDay(tx, dayId);
+    const [imported] = await tx
+      .select({ id: salesLines.id })
+      .from(salesLines)
+      .where(and(eq(salesLines.businessDayId, day.id), eq(salesLines.source, "pos_import")))
+      .limit(1);
+    if (imported) {
+      throw new UserError("This day's sales were imported from the POS. Undo that import to type totals by hand instead.");
+    }
     await tx.delete(salesLines).where(and(eq(salesLines.businessDayId, day.id), eq(salesLines.source, "manual")));
     const rows: (typeof salesLines.$inferInsert)[] = [];
     const add = (lineType: SalesLineType, tender: Tender | null, pair: Pair) => {

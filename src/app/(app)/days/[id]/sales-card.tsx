@@ -1,23 +1,29 @@
+import Link from "next/link";
 import { saveSalesAction } from "@/app/actions";
 import { ActionForm } from "@/components/action-form";
 import { Card, inputClass, Money } from "@/components/ui";
 import { toInputValue, usdEquivalent, type Pair } from "@/lib/money";
 import type { DayData } from "./page";
 
-export function SalesCard({ d, canOperate }: { d: DayData; canOperate: boolean }) {
+export function SalesCard({ d, canOperate: canEdit }: { d: DayData; canOperate: boolean }) {
   const s = d.sales;
+  const importIds = [...new Set(d.lines.map((l) => l.importId).filter((x): x is string => Boolean(x)))];
+  const hasImports = importIds.length > 0;
+  // Imported days are read-only here, so the same sale is never entered twice.
+  const canOperate = canEdit && !hasImports;
   const rows: { key: string; label: string; hint?: string; pair: Pair }[] = [
     { key: "cash", label: "Cash payments", hint: "Goes into the drawer", pair: s.byTender.cash },
     { key: "card", label: "Card payments", pair: s.byTender.card },
     { key: "other", label: "Other payments", hint: "Wallets, transfers, vouchers", pair: s.byTender.other },
-    { key: "cashRefunds", label: "Cash refunds", hint: "Paid back out of the drawer", pair: s.refunds },
+    hasImports
+      ? { key: "cashRefunds", label: "Refunds", hint: "Cash and card", pair: s.refunds }
+      : { key: "cashRefunds", label: "Cash refunds", hint: "Paid back out of the drawer", pair: s.refunds },
     { key: "discounts", label: "Discounts", pair: s.discounts },
     { key: "voids", label: "Voids", pair: s.voids },
     { key: "tax", label: "VAT", pair: s.tax },
     { key: "serviceCharge", label: "Service charge", pair: s.serviceCharge },
   ];
   const collectedEquiv = usdEquivalent(s.collected, d.rateScaled);
-  const hasImports = d.lines.some((l) => l.source === "pos_import");
 
   const footer = (
     <div className="flex flex-wrap items-baseline justify-between gap-2 rounded-lg bg-stone-50 px-3 py-2 text-sm">
@@ -36,13 +42,26 @@ export function SalesCard({ d, canOperate }: { d: DayData; canOperate: boolean }
       step={1}
       title="Sales from the POS"
       description={
-        canOperate
-          ? "Copy the totals from the POS end-of-day (Z) report. LBP accepts shorthand like 4.5m or 250k."
-          : "Totals from the POS end-of-day report."
+        hasImports
+          ? "Imported from the POS export."
+          : canOperate
+            ? "Copy the totals from the POS end-of-day (Z) report, or import the POS export instead. LBP accepts shorthand like 4.5m or 250k."
+            : "Totals from the POS end-of-day report."
       }
     >
       {hasImports && (
-        <p className="mb-3 text-xs text-stone-500">Includes lines imported from the POS export.</p>
+        <p className="mb-3 rounded-lg bg-sky-50 px-3 py-2 text-xs text-sky-900">
+          {d.lines.length} lines from{" "}
+          {importIds.map((id, i) => (
+            <span key={id}>
+              {i > 0 && ", "}
+              <Link href={`/import/${id}`} className="font-medium underline">
+                {importIds.length > 1 ? `import ${i + 1}` : "this import"}
+              </Link>
+            </span>
+          ))}
+          . To type totals by hand instead, undo the import first.
+        </p>
       )}
       {canOperate ? (
         <ActionForm action={saveSalesAction} submitLabel="Save sales totals">

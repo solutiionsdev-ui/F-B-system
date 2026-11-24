@@ -6,6 +6,7 @@ import {
   bigserial,
   boolean,
   date,
+  integer,
   jsonb,
   numeric,
   pgTable,
@@ -101,6 +102,7 @@ export const salesLines = pgTable("sales_lines", {
   tender: text("tender").$type<Tender>(),
   currency: text("currency").$type<Currency>().notNull(),
   amountMinor: money("amount_minor").notNull(),
+  importId: uuid("import_id"),
   createdBy: uuid("created_by"),
   createdAt: ts("created_at").notNull().defaultNow(),
 });
@@ -221,4 +223,37 @@ export const invitations = pgTable("invitations", {
   acceptedAt: ts("accepted_at"),
   acceptedBy: uuid("accepted_by"),
   revokedAt: ts("revoked_at"),
+});
+
+export const posProfiles = pgTable("pos_profiles", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  orgId: uuid("org_id").notNull(),
+  name: text("name").notNull(),
+  mapping: jsonb("mapping").notNull(),
+  createdBy: uuid("created_by"),
+  createdAt: ts("created_at").notNull().defaultNow(),
+  updatedAt: ts("updated_at").notNull().defaultNow(),
+});
+
+export const posImports = pgTable("pos_imports", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  orgId: uuid("org_id").notNull(),
+  locationId: uuid("location_id").notNull(),
+  status: text("status").$type<"draft" | "posted" | "undone">().notNull().default("draft"),
+  fileName: text("file_name").notNull(),
+  fileHash: text("file_hash").notNull(),
+  headers: jsonb("headers").$type<string[]>().notNull(),
+  rows: jsonb("rows").$type<string[][]>().notNull(),
+  rowCount: integer("row_count").notNull(),
+  profileId: uuid("profile_id"),
+  mapping: jsonb("mapping"),
+  linesImported: integer("lines_imported"),
+  rowsSkipped: integer("rows_skipped"),
+  daysCreated: integer("days_created"),
+  createdBy: uuid("created_by"),
+  createdAt: ts("created_at").notNull().defaultNow(),
+  postedBy: uuid("posted_by"),
+  postedAt: ts("posted_at"),
+  undoneBy: uuid("undone_by"),
+  undoneAt: ts("undone_at"),
 });

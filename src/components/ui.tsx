@@ -4,6 +4,10 @@ import { formatAmount, type Currency } from "@/lib/money";
 export const inputClass =
   "block w-full rounded-lg border border-stone-300 bg-white px-3 py-2 text-sm text-stone-900 shadow-xs placeholder:text-stone-400 focus:border-brand-600 focus:outline-none focus:ring-2 focus:ring-brand-600/20 disabled:bg-stone-100";
 
+/** Same look as inputClass, sized to its content (for selects inside a sentence or row). */
+export const inlineInputClass =
+  "inline-block w-auto rounded-lg border border-stone-300 bg-white px-3 py-1.5 text-sm text-stone-900 shadow-xs focus:border-brand-600 focus:outline-none focus:ring-2 focus:ring-brand-600/20";
+
 export const labelClass = "block text-xs font-medium text-stone-600 mb-1";
 
 export function buttonClass(variant: "primary" | "secondary" | "danger" | "ghost" = "primary") {

@@ -6,7 +6,7 @@ import {
   updateSettingsAction,
 } from "@/app/actions";
 import { ActionForm } from "@/components/action-form";
-import { Badge, Card, Field, inputClass, PageTitle } from "@/components/ui";
+import { Badge, Card, Field, inlineInputClass, inputClass, PageTitle } from "@/components/ui";
 import { toInputValue } from "@/lib/money";
 import { ROLE_LABEL, ROLES } from "@/lib/roles";
 import { requireContext } from "@/server/auth";
@@ -90,7 +90,7 @@ export default async function TeamPage() {
                         footerClassName="flex-nowrap"
                       >
                         <input type="hidden" name="membershipId" value={m.membershipId} />
-                        <select name="role" defaultValue={m.role} aria-label={`Role for ${m.name}`} className={`${inputClass} w-auto py-1.5`}>
+                        <select name="role" defaultValue={m.role} aria-label={`Role for ${m.name}`} className={inlineInputClass}>
                           {ROLES.map((r) => (
                             <option key={r.value} value={r.value}>
                               {r.label}

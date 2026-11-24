@@ -14,6 +14,7 @@ import {
   expenses,
   memberships,
   organizations,
+  posImports,
   salesLines,
   users,
 } from "@/db/schema";
@@ -24,6 +25,7 @@ import {
   getDashboard,
   getDay,
   saveCount,
+  setOpeningFloat,
   setRate,
   todayIn,
   UserError,
@@ -226,6 +228,21 @@ describe("closed days", () => {
     expect(day.adjustments).toHaveLength(1);
   });
 
+  it("let the opening float be corrected only while open", async () => {
+    const dash = await getDashboard(database.db, cafe);
+    const open = dash.openDays[0];
+    await setOpeningFloat(database.db, cafe, open.id, { USD: 15000n, LBP: 3_000_000n });
+    const d = (await getDay(database.db, cafe, open.id))!;
+    expect(d.breakdown.openingFloat).toEqual({ USD: 15000n, LBP: 3_000_000n });
+    await expect(setOpeningFloat(database.db, cafeAccountant, open.id, { USD: 0n, LBP: 0n })).rejects.toThrow(UserError);
+    const [closed] = await database.db
+      .select()
+      .from(businessDays)
+      .where(and(eq(businessDays.orgId, cafe.orgId), eq(businessDays.status, "closed")))
+      .limit(1);
+    await expect(setOpeningFloat(database.db, cafe, closed.id, { USD: 0n, LBP: 0n })).rejects.toThrow(/closed/);
+  });
+
   it("can't be closed without both counts, and need a reason when they don't balance", async () => {
     const dash = await getDashboard(database.db, cafe);
     const open = dash.openDays[0];
@@ -303,10 +320,19 @@ describe("POS imports", () => {
       .insert(businessDays)
       .values({ orgId: bistro.orgId, locationId: day.locationId, businessDate: "2099-01-01", rateId: day.rateId })
       .returning();
-    await withTenant(database.db, bistro, (tx) => tx.insert(salesLines).values({ ...row, businessDayId: openDayRow.id }));
+    const [batch] = await database.db
+      .insert(posImports)
+      .values({ orgId: bistro.orgId, locationId: day.locationId, fileName: "t.csv", fileHash: "x", headers: [], rows: [], rowCount: 0 })
+      .returning();
+    const line = { ...row, businessDayId: openDayRow.id, importId: batch.id };
+    await withTenant(database.db, bistro, (tx) => tx.insert(salesLines).values(line));
+    await expectPgError(withTenant(database.db, bistro, (tx) => tx.insert(salesLines).values(line)), "23505");
+    // An imported line must belong to an import batch.
     await expectPgError(
-      withTenant(database.db, bistro, (tx) => tx.insert(salesLines).values({ ...row, businessDayId: openDayRow.id })),
-      "23505",
+      withTenant(database.db, bistro, (tx) =>
+        tx.insert(salesLines).values({ ...row, externalRef: "Z-0002", businessDayId: openDayRow.id }),
+      ),
+      "23514",
     );
   });
 });

@@ -49,7 +49,7 @@ left open so you can count and close it.
 npm test
 ```
 
-62 tests. The database tests run the real migrations and check the business
+85 tests. The database tests run the real migrations and check the business
 plan's guarantees against Postgres itself: one group can't see or write
 another's data, accountants can't record expenses, closed days are locked,
 rates and the audit log can't be rewritten, past days keep their exchange
@@ -77,6 +77,45 @@ Downloads:
 Net profit is deliberately withheld, as the business plan requires, until
 unit costs are verified. "Collected minus expenses" is shown as a cash view
 and labelled as not being profit.
+
+## POS import
+
+**POS import** brings in sales from the POS's own export instead of typing
+the end-of-day totals:
+
+1. Upload a CSV or Excel (.xlsx) export, up to 5 MB, for one day or many.
+2. Check how the columns were read. The app guesses the date, record ID,
+   amount, currency, payment method and line type from the column names, and
+   lists every value it found (e.g. "Visa" means card, "Whish Money" means
+   other). Any value that isn't mapped is reported, never silently dropped.
+3. Preview exactly what would be posted, day by day: lines, cash in each
+   currency, collected total, and any rows that can't be read.
+4. Import. Missing business days can be opened automatically (at the
+   exchange rate in effect on that date); set their opening float on the
+   day page.
+
+Save the mapping as a **POS format** (e.g. "Omega POS payments report") and
+the next file with the same columns is read the same way automatically. This
+is the "POS export mapping" step of onboarding.
+
+Built-in rules:
+
+- **No double counting.** Each row's record ID (e.g. receipt no. + payment
+  line) is stored; a row already imported for that location is skipped, even
+  from a different file. Postgres enforces it with a unique index.
+- **Late-night sales** before a cutoff hour (default 05:00) count for the
+  previous business day.
+- **Mixed currency.** One amount column plus a currency column, or separate
+  USD and LBP columns (a row paid in both becomes two lines).
+- **Negative payments** are imported as refunds. Only cash refunds reduce
+  the expected cash in the drawer.
+- **Closed days** are never touched, and a day whose totals were typed by hand
+  can't also be imported (and vice versa).
+- **Undo** removes everything an import added, as long as those days are
+  still open. The uploaded file is kept with the import and can't be edited.
+
+Try it with `public/samples/sample-pos-export.csv` (also downloadable from the
+import page).
 
 ## Team and locations
 
@@ -110,6 +149,8 @@ are changed by us, not from the app (billing is manual for now).
 | Business operations (framework-free) | `src/server/operations.ts` |
 | Period reports, CSV and PDF | `src/server/reports.ts`, `report-csv.ts`, `report-pdf.ts` |
 | Team, invitations, locations, settings | `src/server/team.ts`, `src/db/migrations/0003_team.ts` |
+| POS import: parsing and mapping (pure) | `src/lib/pos-import.ts` |
+| POS import: preview, post, undo, formats | `src/server/pos-import.ts`, `src/db/migrations/0004_pos_import.ts` |
 | Sessions and the current restaurant group | `src/server/auth.ts` |
 | Screens | `src/app/(app)/` |
 
@@ -134,6 +175,6 @@ through the transaction pooler; the app turns off prepared statements for that.
 
 ## Not built yet (next steps toward the pilot)
 
-- POS export import (needs real export files from the pilot restaurants)
+- POS formats for the pilots' actual systems (needs a real export from each)
 - Petty cash fund balance tracking
 - Hosted deployment
