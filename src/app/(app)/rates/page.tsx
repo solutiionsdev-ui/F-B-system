@@ -23,7 +23,7 @@ export default async function RatesPage() {
       <div className="grid items-start gap-6 lg:grid-cols-[360px_minmax(0,1fr)]">
         <div className="space-y-6">
           <Card>
-            <div className="text-xs font-medium uppercase tracking-wide text-stone-500">Current rate</div>
+            <div className="text-xs font-medium text-stone-500">Current rate</div>
             <div className="num mt-1 text-3xl font-semibold text-stone-900">
               {current ? formatRate(parseRate(current.lbpPerUsd)) : "—"}
               <span className="ml-1 text-base font-normal text-stone-500">LBP / $</span>
@@ -58,7 +58,7 @@ export default async function RatesPage() {
         <Card title="History" description="Rates are never edited or deleted. Every change is kept with who made it.">
           <div className="-mx-5 -my-4 overflow-x-auto">
             <table className="w-full text-sm">
-              <thead className="bg-stone-50 text-left text-xs font-medium uppercase tracking-wide text-stone-500">
+              <thead className="border-y border-stone-100 bg-stone-50/60 text-left text-xs font-medium text-stone-500">
                 <tr>
                   <th className="px-5 py-2.5">Effective</th>
                   <th className="px-3 py-2.5 text-right">LBP / $</th>

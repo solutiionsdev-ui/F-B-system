@@ -69,7 +69,7 @@ export function SalesCard({ d, canOperate: canEdit }: { d: DayData; canOperate: 
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
               <thead>
-                <tr className="text-left text-xs font-medium uppercase tracking-wide text-stone-500">
+                <tr className="text-left text-xs font-medium text-stone-500">
                   <th className="pb-2 pr-3 font-medium">Line</th>
                   <th className="w-36 pb-2 pr-2 text-right font-medium">USD</th>
                   <th className="w-40 pb-2 text-right font-medium">LBP</th>
@@ -116,10 +116,10 @@ export function SalesCard({ d, canOperate: canEdit }: { d: DayData; canOperate: 
               {rows.map((r) => (
                 <tr key={r.key}>
                   <td className="py-1.5 text-stone-700">{r.label}</td>
-                  <td className="py-1.5 text-right">
+                  <td className="whitespace-nowrap py-1.5 pl-3 text-right">
                     <Money minor={r.pair.USD} currency="USD" />
                   </td>
-                  <td className="py-1.5 text-right">
+                  <td className="whitespace-nowrap py-1.5 pl-4 text-right">
                     <Money minor={r.pair.LBP} currency="LBP" />
                   </td>
                 </tr>

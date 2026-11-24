@@ -32,7 +32,7 @@ export function InviteForm({ orgName, full }: { orgName: string; full: boolean }
         </label>
         <fieldset>
           <legend className={labelClass}>Role</legend>
-          <div className="grid gap-2 sm:grid-cols-3">
+          <div className="grid gap-2 [grid-template-columns:repeat(auto-fit,minmax(190px,1fr))]">
             {ROLES.map((r) => (
               <label
                 key={r.value}

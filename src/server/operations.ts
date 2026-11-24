@@ -2,7 +2,7 @@
 // runs in the app, in the seed script and in tests. Every function that
 // touches restaurant data goes through withTenant(), so row-level security
 // applies to it.
-import { and, asc, desc, eq, lte, sql } from "drizzle-orm";
+import { and, asc, count, desc, eq, isNull, lte, sql } from "drizzle-orm";
 import { type DB, type TenantScope, type Tx, withTenant } from "@/db/database";
 import {
   adjustments,
@@ -14,8 +14,10 @@ import {
   exchangeRates,
   expenseCategories,
   expenses,
+  invitations,
   locations,
   organizations,
+  posImports,
   salesLines,
   users,
   type Currency,
@@ -586,3 +588,18 @@ export async function getClientOverview(db: DB, userId: string, memberships: { o
   );
 }
 
+
+/** Small numbers for the sidebar badges, plus the group's plan. */
+export function getNavCounts(db: DB, scope: TenantScope) {
+  return withTenant(db, scope, async (tx) => {
+    const [org] = await tx.select({ plan: organizations.plan }).from(organizations).where(eq(organizations.id, scope.orgId));
+    const [{ n: openDays }] = await tx.select({ n: count() }).from(businessDays).where(eq(businessDays.status, "open"));
+    const [{ n: importDrafts }] = await tx.select({ n: count() }).from(posImports).where(eq(posImports.status, "draft"));
+    // Invitations are only visible to owners (row-level security returns 0 for others).
+    const [{ n: pendingInvites }] = await tx
+      .select({ n: count() })
+      .from(invitations)
+      .where(and(isNull(invitations.acceptedAt), isNull(invitations.revokedAt)));
+    return { plan: org.plan, openDays, importDrafts, pendingInvites };
+  });
+}

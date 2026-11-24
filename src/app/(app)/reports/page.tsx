@@ -3,6 +3,7 @@ import {
   Badge,
   buttonClass,
   Card,
+  Delta,
   Field,
   formatDate,
   inputClass,
@@ -15,7 +16,9 @@ import { formatRate, type Pair } from "@/lib/money";
 import { requireContext } from "@/server/auth";
 import { getDb } from "@/server/db";
 import { todayIn, UserError } from "@/server/operations";
-import { getComparison, getPeriodReport, REPORT_ROLES, shiftDate, type PeriodReport } from "@/server/reports";
+import { dailyTotals, getComparison, getPeriodReport, REPORT_ROLES, shiftDate, type PeriodReport } from "@/server/reports";
+import { TrendChart } from "@/components/charts/trend-chart";
+import { CashCalendar } from "@/components/charts/cash-calendar";
 
 type Search = { from?: string; to?: string; location?: string };
 
@@ -32,8 +35,7 @@ function presets(today: string) {
 
 function change(cur: bigint, prev: bigint | undefined) {
   if (prev == null || prev === 0n) return null;
-  const p = (Number(cur - prev) / Math.abs(Number(prev))) * 100;
-  return `${p >= 0 ? "+" : ""}${p.toFixed(0)}% vs previous`;
+  return (Number(cur - prev) / Math.abs(Number(prev))) * 100;
 }
 
 export default async function ReportsPage({ searchParams }: { searchParams: Promise<Search> }) {
@@ -111,7 +113,7 @@ export default async function ReportsPage({ searchParams }: { searchParams: Prom
         }
       />
 
-      <form className="mb-6 flex flex-wrap items-end gap-3 rounded-xl border border-stone-200 bg-white p-4 shadow-xs">
+      <form className="mb-6 flex flex-wrap items-end gap-3 rounded-2xl border border-stone-200/80 bg-white p-4 shadow-[0_1px_2px_rgba(28,25,23,0.04)]">
         <Field label="From">
           <input type="date" name="from" defaultValue={report.filter.from} className={inputClass} />
         </Field>
@@ -131,7 +133,7 @@ export default async function ReportsPage({ searchParams }: { searchParams: Prom
           </Field>
         )}
         <button className={buttonClass("secondary")}>Show</button>
-        <div className="flex flex-wrap gap-1 text-sm sm:ml-auto">
+        <div className="flex flex-wrap gap-0.5 rounded-lg bg-stone-100 p-1 text-[13px] sm:ml-auto">
           {presets(today).map((p) => {
             const pq = new URLSearchParams({ from: p.from, to: p.to });
             if (report.filter.locationId) pq.set("location", report.filter.locationId);
@@ -140,7 +142,8 @@ export default async function ReportsPage({ searchParams }: { searchParams: Prom
               <Link
                 key={p.label}
                 href={`/reports?${pq}`}
-                className={`rounded-md px-2.5 py-1.5 ${active ? "bg-stone-900 text-white" : "text-stone-600 hover:bg-stone-100"}`}
+                aria-current={active ? "true" : undefined}
+                className={`rounded-md px-2.5 py-1 ${active ? "bg-white font-medium text-stone-900 shadow-[0_1px_2px_rgba(28,25,23,0.08)]" : "text-stone-500 hover:text-stone-900"}`}
               >
                 {p.label}
               </Link>
@@ -166,18 +169,30 @@ export default async function ReportsPage({ searchParams }: { searchParams: Prom
         </div>
       )}
 
-      <div className="mb-3 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        <Kpi label="Collected" value={<Money minor={t.salesEq.collected} currency="USD" />} sub={change(t.salesEq.collected, comparison?.collectedEq)} />
-        <Kpi label="Recorded expenses" value={<Money minor={t.expensesEq} currency="USD" />} sub={change(t.expensesEq, comparison?.expensesEq)} />
+      <div className="mb-3 grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+        <Kpi
+          label="Collected"
+          value={<Money minor={t.salesEq.collected} currency="USD" />}
+          chip={<Delta pct={change(t.salesEq.collected, comparison?.collectedEq)} label="vs previous period" />}
+          sub={comparison ? "vs the previous period of the same length" : "No earlier period to compare"}
+        />
+        <Kpi
+          label="Recorded expenses"
+          value={<Money minor={t.expensesEq} currency="USD" />}
+          chip={<Delta pct={change(t.expensesEq, comparison?.expensesEq)} upIsGood={false} label="vs previous period" />}
+          sub={`${report.categories.length} categories`}
+        />
         <Kpi
           label="Collected − expenses"
           value={<Money minor={t.cashResultEq} currency="USD" />}
-          sub={change(t.cashResultEq, comparison?.cashResultEq)}
+          chip={<Delta pct={change(t.cashResultEq, comparison?.cashResultEq)} label="vs previous period" />}
+          sub="Cash view, not profit"
         />
         <Kpi
           label="Cash difference"
           value={<Money minor={c.netAfterAdjustmentsEq} currency="USD" signed variance />}
-          sub={`${c.flaggedDays} flagged of ${c.closedDays} closed days`}
+          chip={c.flaggedDays ? <Badge tone="bad">{c.flaggedDays} flagged</Badge> : <Badge tone="good">Balanced</Badge>}
+          sub={`${c.closedDays} closed days, after corrections`}
         />
       </div>
       <p className="mb-8 text-xs text-stone-500">
@@ -185,6 +200,46 @@ export default async function ReportsPage({ searchParams }: { searchParams: Prom
         later). &ldquo;Collected − expenses&rdquo; is a cash view that includes VAT collected; it isn&apos;t profit. All $ figures use
         each day&apos;s own exchange rate.
       </p>
+
+      <div className="mb-6 grid items-start gap-6 xl:grid-cols-[minmax(0,1.6fr)_minmax(0,1fr)]">
+        <Card
+          title="Collected per day"
+          description="All payment methods, after refunds, in USD at each day's rate."
+          actions={
+            <div className="flex items-center gap-4 text-xs text-stone-500">
+              <span className="flex items-center gap-1.5">
+                <span className="h-0.5 w-4 rounded-full bg-brand-500" /> This period
+              </span>
+              {comparison && (
+                <span className="flex items-center gap-1.5">
+                  <span className="w-4 border-t-[1.5px] border-dashed border-[#898781]" /> Previous period
+                </span>
+              )}
+            </div>
+          }
+        >
+          <TrendChart
+            points={dailyTotals(report).map((d, i) => ({
+              date: d.date,
+              value: Number(d.collectedEq),
+              prevDate: comparison?.daily[i]?.date ?? null,
+              prev: comparison?.daily[i] ? Number(comparison.daily[i].collectedEq) : null,
+            }))}
+          />
+        </Card>
+        <Card title="Cash difference by day" description="After corrections. Hover a day for details; the daily table below has every figure.">
+          <CashCalendar
+            toleranceCents={Number(report.org.toleranceCents)}
+            days={dailyTotals(report).map((d) => ({
+              date: d.date,
+              varianceAfterEq: Number(d.varianceAfterEq),
+              closed: d.closed,
+              open: d.open,
+              flagged: d.flagged,
+            }))}
+          />
+        </Card>
+      </div>
 
       <div className="mb-6 grid items-start gap-6 lg:grid-cols-2">
         <SalesCard r={report} />
@@ -221,7 +276,7 @@ export default async function ReportsPage({ searchParams }: { searchParams: Prom
           <Card title="By location">
             <div className="-mx-5 -my-4 overflow-x-auto">
               <table className="w-full text-sm">
-                <thead className="bg-stone-50 text-left text-xs font-medium uppercase tracking-wide text-stone-500">
+                <thead className="border-y border-stone-100 bg-stone-50/60 text-left text-xs font-medium text-stone-500">
                   <tr>
                     <th className="px-5 py-2">Location</th>
                     <th className="px-3 py-2 text-right">Collected</th>
@@ -264,7 +319,7 @@ export default async function ReportsPage({ searchParams }: { searchParams: Prom
         ) : (
           <div className="-mx-5 -my-4 overflow-x-auto">
             <table className="w-full text-sm">
-              <thead className="bg-stone-50 text-left text-xs font-medium uppercase tracking-wide text-stone-500">
+              <thead className="border-y border-stone-100 bg-stone-50/60 text-left text-xs font-medium text-stone-500">
                 <tr>
                   <th className="px-5 py-2.5">Date</th>
                   <th className="px-3 py-2.5">Location</th>
@@ -314,12 +369,15 @@ export default async function ReportsPage({ searchParams }: { searchParams: Prom
   );
 }
 
-function Kpi({ label, value, sub }: { label: string; value: React.ReactNode; sub?: string | null }) {
+function Kpi({ label, value, chip, sub }: { label: string; value: React.ReactNode; chip?: React.ReactNode; sub?: string | null }) {
   return (
-    <div className="rounded-xl border border-stone-200 bg-white p-4 shadow-xs">
-      <div className="text-[11px] font-medium uppercase tracking-wide text-stone-500">{label}</div>
-      <div className="mt-1 text-2xl font-semibold text-stone-900">{value}</div>
-      {sub && <div className="mt-1 text-xs text-stone-500">{sub}</div>}
+    <div className="rounded-2xl border border-stone-200/80 bg-white p-4 shadow-[0_1px_2px_rgba(28,25,23,0.04)]">
+      <div className="flex items-start justify-between gap-2">
+        <span className="text-[13px] text-stone-500">{label}</span>
+        {chip}
+      </div>
+      <div className="mt-3 text-[26px] font-semibold leading-none tracking-tight text-stone-900">{value}</div>
+      {sub && <div className="mt-2.5 text-xs text-stone-500">{sub}</div>}
     </div>
   );
 }
@@ -369,7 +427,7 @@ function SalesCard({ r }: { r: PeriodReport }) {
       <div className="overflow-x-auto">
         <table className="w-full text-sm">
           <thead>
-            <tr className="text-right text-xs font-medium uppercase tracking-wide text-stone-500">
+            <tr className="text-right text-xs font-medium text-stone-500">
               <th />
               <th className="pb-2 font-medium">USD</th>
               <th className="pb-2 pl-3 font-medium">LBP</th>
@@ -384,7 +442,7 @@ function SalesCard({ r }: { r: PeriodReport }) {
               >
                 <td className="py-1.5 pr-2">
                   {row.label}
-                  {row.memo && <span className="ml-1 text-[10px] uppercase tracking-wide text-stone-400">memo</span>}
+                  {row.memo && <span className="ml-1 text-[10px] text-stone-400">memo</span>}
                 </td>
                 <PairCells p={row.p} eq={row.eq} />
               </tr>
@@ -421,7 +479,7 @@ function ExpensesCard({ r }: { r: PeriodReport }) {
                   </span>
                 </div>
                 <div className="mt-1 h-1.5 rounded-full bg-stone-100">
-                  <div className="h-1.5 rounded-full bg-brand-600" style={{ width: `${Math.max(share, 1)}%` }} />
+                  <div className="h-1.5 rounded-full bg-brand-500" style={{ width: `${Math.max(share, 1)}%` }} />
                 </div>
               </li>
             );

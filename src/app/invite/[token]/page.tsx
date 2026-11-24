@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { acceptInviteAction } from "@/app/actions";
 import { ActionForm } from "@/components/action-form";
-import { buttonClass, Field, inputClass } from "@/components/ui";
+import { buttonClass, Field, inputClass, Logo } from "@/components/ui";
 import { ROLE_LABEL, ROLES } from "@/lib/roles";
 import { getDb } from "@/server/db";
 import { getInviteByToken } from "@/server/team";
@@ -23,7 +23,9 @@ export default async function InvitePage({ params }: { params: Promise<{ token: 
     <main className="flex flex-1 items-center justify-center px-4 py-16">
       <div className="w-full max-w-md">
         <div className="mb-8 text-center">
-          <div className="mx-auto mb-3 flex h-10 w-10 items-center justify-center rounded-xl bg-brand-700 text-lg font-bold text-white">$</div>
+          <div className="mb-4 flex justify-center">
+            <Logo size={40} />
+          </div>
           {invite.status === "valid" ? (
             <>
               <h1 className="text-xl font-semibold text-stone-900">Join {invite.orgName}</h1>

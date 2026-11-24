@@ -156,10 +156,18 @@ export type ExpenseRow = {
   enteredBy: string | null;
 };
 
-export type PeriodReport = Awaited<ReturnType<typeof getPeriodReport>>;
+export type PeriodReport = Awaited<ReturnType<typeof computePeriodReport>>;
 
 export async function getPeriodReport(db: DB, scope: TenantScope, filter: ReportFilter) {
   if (!REPORT_ROLES.includes(scope.role)) throw new UserError("Reports are available to owners and accountants.");
+  return computePeriodReport(db, scope, filter);
+}
+
+/**
+ * The report itself, without the role check. Only for server code that shows
+ * a small slice of it to every role (the Today page's headline figures).
+ */
+export async function computePeriodReport(db: DB, scope: TenantScope, filter: ReportFilter) {
   const f = validateFilter(filter);
 
   return withTenant(db, scope, async (tx) => {
@@ -405,6 +413,28 @@ export async function getPeriodReport(db: DB, scope: TenantScope, filter: Report
   });
 }
 
+/** Per-date totals across locations: what the trend chart and calendar plot. */
+export function dailyTotals(r: PeriodReport) {
+  const byDate = new Map<
+    string,
+    { date: string; collectedEq: bigint; expensesEq: bigint; varianceAfterEq: bigint; closed: number; open: number; flagged: number }
+  >();
+  for (let d = r.filter.from; d <= r.filter.to; d = shiftDate(d, 1)) {
+    byDate.set(d, { date: d, collectedEq: 0n, expensesEq: 0n, varianceAfterEq: 0n, closed: 0, open: 0, flagged: 0 });
+  }
+  for (const d of r.daily) {
+    const t = byDate.get(d.date)!;
+    t.collectedEq += d.salesEq.collected;
+    if (d.closing) {
+      t.closed++;
+      t.varianceAfterEq += d.varianceAfterEq ?? 0n;
+      if (!d.closing.withinTolerance) t.flagged++;
+    } else t.open++;
+  }
+  for (const e of r.expenses) if (e.status === "active") byDate.get(e.date)!.expensesEq += e.eq;
+  return [...byDate.values()];
+}
+
 /** Headline figures for the previous period, for "vs previous" comparisons. */
 export async function getComparison(db: DB, scope: TenantScope, filter: ReportFilter) {
   const prev = await getPeriodReport(db, scope, previousPeriod(validateFilter(filter)));
@@ -415,5 +445,6 @@ export async function getComparison(db: DB, scope: TenantScope, filter: ReportFi
     cashResultEq: prev.totals.cashResultEq,
     netAfterAdjustmentsEq: prev.cash.netAfterAdjustmentsEq,
     days: prev.daily.length,
+    daily: dailyTotals(prev).map((d) => ({ date: d.date, collectedEq: d.collectedEq })),
   };
 }

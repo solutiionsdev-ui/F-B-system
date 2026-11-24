@@ -2,22 +2,22 @@ import type { ReactNode } from "react";
 import { formatAmount, type Currency } from "@/lib/money";
 
 export const inputClass =
-  "block w-full rounded-lg border border-stone-300 bg-white px-3 py-2 text-sm text-stone-900 shadow-xs placeholder:text-stone-400 focus:border-brand-600 focus:outline-none focus:ring-2 focus:ring-brand-600/20 disabled:bg-stone-100";
+  "block w-full rounded-lg border border-stone-200 bg-white px-3 py-2 text-sm text-stone-900 placeholder:text-stone-400 focus:border-brand-500 focus:outline-none focus:ring-4 focus:ring-brand-500/15 disabled:bg-stone-100";
 
 /** Same look as inputClass, sized to its content (for selects inside a sentence or row). */
 export const inlineInputClass =
-  "inline-block w-auto rounded-lg border border-stone-300 bg-white px-3 py-1.5 text-sm text-stone-900 shadow-xs focus:border-brand-600 focus:outline-none focus:ring-2 focus:ring-brand-600/20";
+  "inline-block w-auto rounded-lg border border-stone-200 bg-white px-3 py-1.5 text-sm text-stone-900 focus:border-brand-500 focus:outline-none focus:ring-4 focus:ring-brand-500/15";
 
-export const labelClass = "block text-xs font-medium text-stone-600 mb-1";
+export const labelClass = "block text-xs font-medium text-stone-500 mb-1.5";
 
 export function buttonClass(variant: "primary" | "secondary" | "danger" | "ghost" = "primary") {
   const base =
-    "inline-flex items-center justify-center gap-2 rounded-lg px-3.5 py-2 text-sm font-medium transition disabled:opacity-50 disabled:cursor-not-allowed focus:outline-none focus-visible:ring-2 focus-visible:ring-offset-2";
+    "inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-lg px-3.5 py-2 text-sm font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed focus:outline-none focus-visible:ring-2 focus-visible:ring-offset-2";
   const variants = {
-    primary: "bg-brand-700 text-white hover:bg-brand-800 focus-visible:ring-brand-600",
-    secondary: "border border-stone-300 bg-white text-stone-800 hover:bg-stone-50 focus-visible:ring-stone-400",
-    danger: "bg-red-700 text-white hover:bg-red-800 focus-visible:ring-red-600",
-    ghost: "text-stone-600 hover:text-stone-900 hover:bg-stone-100",
+    primary: "bg-ink text-white hover:bg-stone-700 focus-visible:ring-stone-500",
+    secondary: "border border-stone-200 bg-white text-stone-800 hover:bg-stone-50 focus-visible:ring-stone-400",
+    danger: "bg-red-600 text-white hover:bg-red-700 focus-visible:ring-red-500",
+    ghost: "text-stone-500 hover:text-stone-900 hover:bg-stone-100",
   };
   return `${base} ${variants[variant]}`;
 }
@@ -38,18 +38,18 @@ export function Card({
   className?: string;
 }) {
   return (
-    <section className={`min-w-0 rounded-xl border border-stone-200 bg-white shadow-xs ${className}`}>
+    <section className={`min-w-0 rounded-2xl border border-stone-200/80 bg-white shadow-[0_1px_2px_rgba(28,25,23,0.04)] ${className}`}>
       {(title || actions) && (
-        <header className="flex flex-wrap items-start justify-between gap-3 border-b border-stone-100 px-5 py-4">
-          <div className="flex items-start gap-3">
+        <header className="flex flex-wrap items-start justify-between gap-3 px-5 pt-4 pb-3">
+          <div className="flex items-start gap-2.5">
             {step != null && (
-              <span className="mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-stone-900 text-xs font-semibold text-white">
+              <span className="mt-px flex h-5 w-5 shrink-0 items-center justify-center rounded-md bg-ink text-[11px] font-semibold text-white">
                 {step}
               </span>
             )}
             <div>
-              <h2 className="text-[15px] font-semibold text-stone-900">{title}</h2>
-              {description && <p className="mt-0.5 text-sm text-stone-500">{description}</p>}
+              <h2 className="text-[15px] font-semibold tracking-tight text-stone-900">{title}</h2>
+              {description && <p className="mt-0.5 text-[13px] leading-5 text-stone-500">{description}</p>}
             </div>
           </div>
           {actions}
@@ -61,22 +61,42 @@ export function Card({
 }
 
 const tones = {
-  neutral: "bg-stone-100 text-stone-700 ring-stone-200",
-  good: "bg-emerald-50 text-emerald-800 ring-emerald-200",
-  warn: "bg-amber-50 text-amber-800 ring-amber-200",
-  bad: "bg-red-50 text-red-800 ring-red-200",
-  info: "bg-sky-50 text-sky-800 ring-sky-200",
+  neutral: "bg-stone-100 text-stone-600",
+  good: "bg-emerald-50 text-emerald-700",
+  warn: "bg-amber-50 text-amber-700",
+  bad: "bg-red-50 text-red-700",
+  info: "bg-sky-50 text-sky-700",
+  accent: "bg-brand-50 text-brand-700",
 };
+export type Tone = keyof typeof tones;
 
-export function Badge({ tone = "neutral", children }: { tone?: keyof typeof tones; children: ReactNode }) {
+/** A status pill: soft tint, never colour alone (always a word). */
+export function Badge({ tone = "neutral", children }: { tone?: Tone; children: ReactNode }) {
   return (
-    <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ring-1 ring-inset ${tones[tone]}`}>
+    <span className={`inline-flex items-center gap-1 whitespace-nowrap rounded-md px-1.5 py-0.5 text-xs font-medium ${tones[tone]}`}>
       {children}
     </span>
   );
 }
 
-/** A money amount. `variance` colours shortages red and overages amber. */
+/** Small "↗ 6.1%" change chip, coloured by whether the direction is good. */
+export function Delta({ pct, upIsGood = true, label }: { pct: number | null; upIsGood?: boolean; label?: string }) {
+  if (pct == null || !Number.isFinite(pct)) return null;
+  const up = pct > 0;
+  const flat = Math.abs(pct) < 0.5;
+  const good = flat ? null : up === upIsGood;
+  const cls = good == null ? "bg-stone-100 text-stone-600" : good ? "bg-emerald-50 text-emerald-700" : "bg-red-50 text-red-700";
+  return (
+    <span className={`num inline-flex items-center gap-0.5 rounded-md px-1.5 py-0.5 text-[11px] font-semibold ${cls}`} title={label}>
+      <span aria-hidden>{flat ? "→" : up ? "↗" : "↘"}</span>
+      {up && !flat ? "+" : ""}
+      {pct.toFixed(Math.abs(pct) < 10 ? 1 : 0)}%
+      {label && <span className="sr-only"> {label}</span>}
+    </span>
+  );
+}
+
+/** A money amount. `variance` colours shortages red, overages blue and zero green. */
 export function Money({
   minor,
   currency,
@@ -90,7 +110,7 @@ export function Money({
   variance?: boolean;
   className?: string;
 }) {
-  const tone = variance ? (minor < 0n ? "text-red-700" : minor > 0n ? "text-amber-700" : "text-emerald-700") : "";
+  const tone = variance ? (minor < 0n ? "text-red-700" : minor > 0n ? "text-sky-700" : "text-emerald-700") : "";
   return <span className={`num whitespace-nowrap ${tone} ${className}`}>{formatAmount(minor, currency, { signed })}</span>;
 }
 
@@ -107,9 +127,9 @@ export function Field({ label, hint, children, className = "" }: { label: string
 export function PageTitle({ title, subtitle, actions }: { title: ReactNode; subtitle?: ReactNode; actions?: ReactNode }) {
   return (
     <div className="mb-6 flex flex-wrap items-end justify-between gap-4">
-      <div>
-        <h1 className="text-2xl font-semibold tracking-tight text-stone-900">{title}</h1>
-        {subtitle && <div className="mt-1 text-sm text-stone-500">{subtitle}</div>}
+      <div className="min-w-0">
+        <h1 className="text-[26px] font-semibold leading-tight tracking-tight text-stone-900 sm:text-[30px]">{title}</h1>
+        {subtitle && <div className="mt-1.5 text-sm text-stone-500">{subtitle}</div>}
       </div>
       {actions}
     </div>
@@ -145,3 +165,22 @@ export const PAID_FROM_LABELS: Record<string, string> = {
   bank: "Bank / transfer",
   owner: "Owner paid",
 };
+
+/** The app mark: an ink square with an orange cut. */
+export function Logo({ size = 28 }: { size?: number }) {
+  return (
+    <span
+      className="relative inline-flex shrink-0 items-center justify-center overflow-hidden rounded-lg bg-ink text-white"
+      style={{ width: size, height: size }}
+      aria-hidden
+    >
+      <svg viewBox="0 0 24 24" width={size * 0.58} height={size * 0.58} fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round">
+        <path d="M15.5 8.2c-.7-1-2-1.7-3.5-1.7-2 0-3.5 1-3.5 2.6 0 3.6 7.2 1.8 7.2 5.4 0 1.6-1.6 2.7-3.7 2.7-1.7 0-3.1-.7-3.8-1.9M12 4.5v15" />
+      </svg>
+      <span className="absolute -right-1 -top-1 h-2.5 w-2.5 rounded-full bg-brand-500" />
+    </span>
+  );
+}
+
+/** Small grey section heading used inside cards and sidebars. */
+export const tableHeadClass = "text-left text-xs font-medium text-stone-500";

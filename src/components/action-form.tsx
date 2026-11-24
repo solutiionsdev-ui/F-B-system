@@ -2,6 +2,7 @@
 
 import { startTransition, useActionState, useEffect, useRef, type ReactNode } from "react";
 import { initialActionState, type ActionState } from "@/lib/action-state";
+import { useToast } from "./toast";
 import { buttonClass } from "./ui";
 
 /**
@@ -32,10 +33,16 @@ export function ActionForm({
 }) {
   const [state, formAction, pending] = useActionState(action, initialActionState);
   const ref = useRef<HTMLFormElement>(null);
+  const toast = useToast();
 
   useEffect(() => {
     if (state.at && resetOnSuccess) ref.current?.reset();
   }, [state.at, resetOnSuccess]);
+
+  // Successes appear as a toast inside the app; errors stay beside the form.
+  useEffect(() => {
+    if (state.at && state.ok && toast) toast({ title: state.ok });
+  }, [state.at, state.ok, toast]);
 
   return (
     <form
@@ -55,7 +62,7 @@ export function ActionForm({
         </button>
         <span aria-live="polite" className="text-sm">
           {!pending && state.error && <span className="font-medium text-red-700">{state.error}</span>}
-          {!pending && !state.error && state.ok && <span className="text-emerald-700">✓ {state.ok}</span>}
+          {!pending && !state.error && state.ok && !toast && <span className="text-emerald-700">✓ {state.ok}</span>}
         </span>
       </div>
     </form>

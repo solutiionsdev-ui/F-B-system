@@ -41,7 +41,7 @@ export function DrawerCard({ d }: { d: DayData }) {
     <Card title="Drawer check" description={c ? "Frozen when the day was closed." : "Updates as you enter sales, expenses and counts."}>
       <table className="w-full text-sm">
         <thead>
-          <tr className="text-right text-xs font-medium uppercase tracking-wide text-stone-500">
+          <tr className="text-right text-xs font-medium text-stone-500">
             <th />
             <th className="pb-2 font-medium">USD</th>
             <th className="pb-2 pl-3 font-medium">LBP</th>
@@ -228,7 +228,7 @@ export function ClosedSummary({ d, canAdjust }: { d: DayData; canAdjust: boolean
         </div>
         {d.adjustments.length > 0 && (
           <div className="text-right text-sm">
-            <div className="text-xs font-medium uppercase tracking-wide text-stone-500">After adjustments</div>
+            <div className="text-xs font-medium text-stone-500">After adjustments</div>
             <Money minor={adjustedEquiv} currency="USD" signed variance className="text-lg font-semibold" />
           </div>
         )}
