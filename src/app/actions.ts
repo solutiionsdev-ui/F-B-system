@@ -7,6 +7,7 @@ import { redirect } from "next/navigation";
 import type { DB } from "@/db/database";
 import type { Currency, PaidFrom, VarianceReason } from "@/db/schema";
 import type { ActionState } from "@/lib/action-state";
+import { PAYMENT_METHODS, type MovementKind } from "@/lib/expense-buckets";
 import { MoneyError, parseAmount, parseOptionalAmount, type Pair } from "@/lib/money";
 import { createSession, requireContext, setActiveOrg, signIn, signOut, type AppContext } from "@/server/auth";
 import { getDb } from "@/server/db";
@@ -97,6 +98,12 @@ function field(fd: FormData, name: string, currency: Currency, label: string, op
 const currencyOf = (v: string): Currency => {
   if (v !== "USD" && v !== "LBP") throw new UserError("Pick a currency.");
   return v;
+};
+
+const paidFromOf = (v: string): PaidFrom => {
+  if (!v) return "drawer";
+  if (!(PAYMENT_METHODS as readonly string[]).includes(v)) throw new UserError("Pick how the expense was paid.");
+  return v as PaidFrom;
 };
 
 // ---------------------------------------------------------------- session
@@ -210,9 +217,10 @@ export async function addExpenseAction(_: ActionState, fd: FormData) {
         categoryId: str(fd, "categoryId"),
         description: str(fd, "description"),
         vendor: str(fd, "vendor"),
+        receiptRef: str(fd, "receiptRef"),
         currency,
         amountMinor: field(fd, "amount", currency, "Amount", false),
-        paidFrom: (str(fd, "paidFrom") || "drawer") as PaidFrom,
+        paidFrom: paidFromOf(str(fd, "paidFrom")),
       });
     },
     [`/days/${dayId}`],
@@ -236,7 +244,7 @@ export async function addMovementAction(_: ActionState, fd: FormData) {
       const currency = currencyOf(str(fd, "currency"));
       return addMovement(db, ctx.scope, {
         dayId,
-        direction: str(fd, "direction") === "in" ? "in" : "out",
+        kind: str(fd, "kind") as MovementKind,
         currency,
         amountMinor: field(fd, "amount", currency, "Amount", false),
         reason: str(fd, "reason"),

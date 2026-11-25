@@ -177,10 +177,10 @@ export default async function ReportsPage({ searchParams }: { searchParams: Prom
           sub={comparison ? "vs the previous period of the same length" : "No earlier period to compare"}
         />
         <Kpi
-          label="Recorded expenses"
+          label="Operating expenses"
           value={<Money minor={t.expensesEq} currency="USD" />}
           chip={<Delta pct={change(t.expensesEq, comparison?.expensesEq)} upIsGood={false} label="vs previous period" />}
-          sub={`${report.categories.length} categories`}
+          sub={`${report.categories.length} categories · safe drops and withdrawals not included`}
         />
         <Kpi
           label="Collected − expenses"
@@ -272,45 +272,46 @@ export default async function ReportsPage({ searchParams }: { searchParams: Prom
             </div>
           )}
         </Card>
-        {report.byLocation.length > 1 ? (
-          <Card title="By location">
-            <div className="-mx-5 -my-4 overflow-x-auto">
-              <table className="w-full text-sm">
-                <thead className="border-y border-stone-100 bg-stone-50/60 text-left font-mono text-[10.5px] font-medium uppercase tracking-[0.06em] text-stone-400">
-                  <tr>
-                    <th className="px-5 py-2">Location</th>
-                    <th className="px-3 py-2 text-right">Collected</th>
-                    <th className="px-3 py-2 text-right">Expenses</th>
-                    <th className="px-5 py-2 text-right">Cash diff.</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-stone-100">
-                  {report.byLocation.map((l) => (
-                    <tr key={l.locationId}>
-                      <td className="px-5 py-2.5">
-                        <div className="font-medium text-stone-800">{l.name}</div>
-                        <div className="text-xs text-stone-500">
-                          {l.closedDays}/{l.days} days closed{l.flaggedDays ? ` · ${l.flaggedDays} flagged` : ""}
-                        </div>
-                      </td>
-                      <td className="px-3 py-2.5 text-right">
-                        <Money minor={l.collectedEq} currency="USD" />
-                      </td>
-                      <td className="px-3 py-2.5 text-right">
-                        <Money minor={l.expensesEq} currency="USD" />
-                      </td>
-                      <td className="px-5 py-2.5 text-right">
-                        <Money minor={l.varianceAfterEq} currency="USD" signed variance />
-                      </td>
+        <div className="grid min-w-0 gap-6">
+          {report.byLocation.length > 1 && (
+            <Card title="By location">
+              <div className="-mx-5 -my-4 overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead className="border-y border-stone-100 bg-stone-50/60 text-left font-mono text-[10.5px] font-medium uppercase tracking-[0.06em] text-stone-400">
+                    <tr>
+                      <th className="px-5 py-2">Location</th>
+                      <th className="px-3 py-2 text-right">Collected</th>
+                      <th className="px-3 py-2 text-right">Expenses</th>
+                      <th className="px-5 py-2 text-right">Cash diff.</th>
                     </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </Card>
-        ) : (
-          <div />
-        )}
+                  </thead>
+                  <tbody className="divide-y divide-stone-100">
+                    {report.byLocation.map((l) => (
+                      <tr key={l.locationId}>
+                        <td className="px-5 py-2.5">
+                          <div className="font-medium text-stone-800">{l.name}</div>
+                          <div className="text-xs text-stone-500">
+                            {l.closedDays}/{l.days} days closed{l.flaggedDays ? ` · ${l.flaggedDays} flagged` : ""}
+                          </div>
+                        </td>
+                        <td className="px-3 py-2.5 text-right">
+                          <Money minor={l.collectedEq} currency="USD" />
+                        </td>
+                        <td className="px-3 py-2.5 text-right">
+                          <Money minor={l.expensesEq} currency="USD" />
+                        </td>
+                        <td className="px-5 py-2.5 text-right">
+                          <Money minor={l.varianceAfterEq} currency="USD" signed variance />
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </Card>
+          )}
+          <MovementsCard r={report} />
+        </div>
       </div>
 
       <Card title="Daily detail" description="Difference is shown after any corrections. Click a day to open it.">
@@ -458,8 +459,8 @@ function ExpensesCard({ r }: { r: PeriodReport }) {
   const total = r.totals.expensesEq;
   return (
     <Card
-      title="Expenses by category"
-      description={`Active expenses${r.totals.voidedExpenses ? ` (${r.totals.voidedExpenses} voided left out)` : ""}, converted at each expense's own rate.`}
+      title="Operating expenses"
+      description={`These reduce profit. Active expenses${r.totals.voidedExpenses ? ` (${r.totals.voidedExpenses} voided left out)` : ""}, converted at each expense's own rate.`}
     >
       {r.categories.length === 0 ? (
         <p className="text-sm text-stone-500">No expenses in this period.</p>
@@ -489,7 +490,7 @@ function ExpensesCard({ r }: { r: PeriodReport }) {
             <Money minor={total} currency="USD" />
           </li>
           <li className="text-xs text-stone-500">
-            Paid from:{" "}
+            Paid with:{" "}
             {r.paidFrom.map((p, i) => (
               <span key={p.paidFrom}>
                 {i > 0 && " · "}
@@ -498,6 +499,40 @@ function ExpensesCard({ r }: { r: PeriodReport }) {
             ))}
           </li>
         </ul>
+      )}
+    </Card>
+  );
+}
+
+function MovementsCard({ r }: { r: PeriodReport }) {
+  return (
+    <Card title="Cash movements" description="Cash that changed place without being a cost. Not counted in expenses or profit.">
+      {r.movements.length === 0 ? (
+        <p className="text-sm text-stone-500">No safe drops, deposits or withdrawals in this period.</p>
+      ) : (
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="text-right font-mono text-[10.5px] font-medium uppercase tracking-[0.06em] text-stone-400">
+                <th />
+                <th className="pb-2 font-medium">USD</th>
+                <th className="pb-2 pl-3 font-medium">LBP</th>
+                <th className="pb-2 pl-3 font-medium">≈ USD</th>
+              </tr>
+            </thead>
+            <tbody>
+              {r.movements.map((m) => (
+                <tr key={m.kind} className="text-stone-700">
+                  <td className="py-1.5 pr-2">
+                    {m.label} <span className="whitespace-nowrap text-xs text-stone-400">× {m.count}</span>
+                    {m.direction === "in" && <span className="ml-1 text-[10px] text-stone-400">in</span>}
+                  </td>
+                  <PairCells p={m.pair} eq={m.eq} />
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       )}
     </Card>
   );

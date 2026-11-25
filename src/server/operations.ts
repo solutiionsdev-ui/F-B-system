@@ -28,6 +28,7 @@ import {
   type VarianceReason,
 } from "@/db/schema";
 import { computeExpected, reconcile, salesSummary } from "@/lib/closing";
+import { isMovementKind, movementDirection, type MovementKind } from "@/lib/expense-buckets";
 import { CURRENCIES, countTotal, parseRate, rateToDb, RATE_SCALE, type Pair } from "@/lib/money";
 
 /** An error whose message is safe and useful to show to the person. */
@@ -221,8 +222,10 @@ export async function addExpense(
   input: {
     dayId: string;
     categoryId: string;
-    description: string;
+    /** Notes; optional. */
+    description?: string;
     vendor?: string;
+    receiptRef?: string;
     currency: Currency;
     amountMinor: bigint;
     paidFrom: PaidFrom;
@@ -230,9 +233,11 @@ export async function addExpense(
 ) {
   requireRole(scope, OPS, "record expenses");
   if (input.amountMinor <= 0n) throw new UserError("Enter an amount greater than zero.");
-  if (!input.description.trim()) throw new UserError("Describe what the expense was for.");
+  if (!input.categoryId) throw new UserError("Pick a category for the expense.");
   return withTenant(db, scope, async (tx) => {
     const day = await loadOpenDay(tx, input.dayId);
+    const [cat] = await tx.select().from(expenseCategories).where(eq(expenseCategories.id, input.categoryId));
+    if (!cat || cat.archived) throw new UserError("Pick one of the categories in the list.");
     const [row] = await tx
       .insert(expenses)
       .values({
@@ -241,8 +246,9 @@ export async function addExpense(
         businessDayId: day.id,
         expenseDate: day.businessDate,
         categoryId: input.categoryId,
-        description: input.description.trim(),
+        description: input.description?.trim() ?? "",
         vendor: input.vendor?.trim() || null,
+        receiptRef: input.receiptRef?.trim() || null,
         currency: input.currency,
         amountMinor: input.amountMinor,
         paidFrom: input.paidFrom,
@@ -271,20 +277,23 @@ export async function voidExpense(db: DB, scope: TenantScope, expenseId: string,
 export async function addMovement(
   db: DB,
   scope: TenantScope,
-  input: { dayId: string; direction: "in" | "out"; currency: Currency; amountMinor: bigint; reason: string },
+  input: { dayId: string; kind: MovementKind; currency: Currency; amountMinor: bigint; reason?: string },
 ) {
   requireRole(scope, OPS, "record cash movements");
+  if (!isMovementKind(input.kind)) throw new UserError("Pick what kind of cash movement this is.");
   if (input.amountMinor <= 0n) throw new UserError("Enter an amount greater than zero.");
-  if (!input.reason.trim()) throw new UserError("Say what the cash movement was for.");
+  const reason = input.reason?.trim() ?? "";
+  if (input.kind === "other" && !reason) throw new UserError("Say what the cash was taken out for.");
   return withTenant(db, scope, async (tx) => {
     const day = await loadOpenDay(tx, input.dayId);
     await tx.insert(cashMovements).values({
       orgId: scope.orgId,
       businessDayId: day.id,
-      direction: input.direction,
+      kind: input.kind,
+      direction: movementDirection(input.kind),
       currency: input.currency,
       amountMinor: input.amountMinor,
-      reason: input.reason.trim(),
+      reason,
       createdBy: scope.userId,
     });
   });
@@ -343,6 +352,7 @@ async function computeDay(tx: Tx, day: typeof businessDays.$inferSelect) {
       id: expenses.id,
       description: expenses.description,
       vendor: expenses.vendor,
+      receiptRef: expenses.receiptRef,
       currency: expenses.currency,
       amountMinor: expenses.amountMinor,
       paidFrom: expenses.paidFrom,
@@ -479,7 +489,7 @@ export function getDay(db: DB, scope: TenantScope, dayId: string) {
       .select({ id: expenseCategories.id, name: expenseCategories.name })
       .from(expenseCategories)
       .where(eq(expenseCategories.archived, false))
-      .orderBy(asc(expenseCategories.name));
+      .orderBy(asc(expenseCategories.position), asc(expenseCategories.name));
     const people = await tx.select({ id: users.id, name: users.name }).from(users);
     const nameOf = (id: string | null) => people.find((p) => p.id === id)?.name ?? null;
     return {

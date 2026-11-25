@@ -161,12 +161,7 @@ export const REASON_LABELS: Record<string, string> = {
   other: "Other",
 };
 
-export const PAID_FROM_LABELS: Record<string, string> = {
-  drawer: "Cash drawer",
-  petty_cash: "Petty cash",
-  bank: "Bank / transfer",
-  owner: "Owner paid",
-};
+export { PAID_FROM_LABELS } from "@/lib/expense-buckets";
 
 /** The app mark: an ink square with an orange cut. */
 export function Logo({ size = 28 }: { size?: number }) {

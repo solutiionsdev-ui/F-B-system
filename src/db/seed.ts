@@ -11,6 +11,7 @@ import {
   organizations,
   users,
 } from "./schema";
+import { DEFAULT_CATEGORIES } from "@/lib/expense-buckets";
 import { hashPassword } from "@/lib/password";
 import { DENOMINATIONS, type Currency, type Pair } from "@/lib/money";
 import {
@@ -26,21 +27,6 @@ import {
 import type { VarianceReason } from "./schema";
 
 export const DEMO_PASSWORD = "pilot-demo-2027";
-
-export const DEFAULT_CATEGORIES = [
-  "Food supplies",
-  "Beverages",
-  "Generator subscription",
-  "Electricity (EDL)",
-  "Water",
-  "Gas & fuel",
-  "Cleaning supplies",
-  "Maintenance",
-  "Delivery & transport",
-  "Staff advances",
-  "Rent",
-  "Other",
-];
 
 /** Small deterministic random generator so the demo data is the same every time. */
 function rng(seed: number) {
@@ -109,7 +95,7 @@ async function simulateDay(db: DB, scope: TenantScope, locationId: string, categ
   const cat = (name: string) => categoryIds.get(name)!;
   await addExpense(db, scope, {
     dayId: day.id,
-    categoryId: cat("Food supplies"),
+    categoryId: cat("Food & Kitchen Suppliers"),
     description: "Bread and kaak delivery",
     vendor: "Local bakery",
     currency: "LBP",
@@ -119,7 +105,7 @@ async function simulateDay(db: DB, scope: TenantScope, locationId: string, categ
   if (r() < 0.6) {
     await addExpense(db, scope, {
       dayId: day.id,
-      categoryId: cat("Beverages"),
+      categoryId: cat("Beverage & Alcohol Suppliers"),
       description: "Ice and water gallons",
       currency: "LBP",
       amountMinor: between(r, 300_000, 700_000, 50_000),
@@ -129,7 +115,7 @@ async function simulateDay(db: DB, scope: TenantScope, locationId: string, categ
   if (r() < 0.4) {
     await addExpense(db, scope, {
       dayId: day.id,
-      categoryId: cat("Cleaning supplies"),
+      categoryId: cat("Cleaning"),
       description: "Detergent and paper towels",
       currency: "USD",
       amountMinor: between(r, 9, 28) * 100n,
@@ -139,7 +125,7 @@ async function simulateDay(db: DB, scope: TenantScope, locationId: string, categ
   if (r() < 0.25) {
     await addExpense(db, scope, {
       dayId: day.id,
-      categoryId: cat("Generator subscription"),
+      categoryId: cat("Generator & Electricity"),
       description: "Monthly generator subscription",
       vendor: "Neighbourhood generator",
       currency: "USD",
@@ -150,10 +136,10 @@ async function simulateDay(db: DB, scope: TenantScope, locationId: string, categ
   if (r() < 0.7) {
     await addMovement(db, scope, {
       dayId: day.id,
-      direction: "out",
+      kind: "safe_drop",
       currency: "USD",
       amountMinor: usd(400),
-      reason: "Safe drop",
+      reason: "Moved to the safe",
     });
   }
   if (!plan.close) return day.id;
@@ -206,7 +192,7 @@ async function seedBase(db: DB) {
   const categories = async (orgId: string) => {
     const rows = await db
       .insert(expenseCategories)
-      .values(DEFAULT_CATEGORIES.map((name) => ({ orgId, name })))
+      .values(DEFAULT_CATEGORIES.map((name, i) => ({ orgId, name, position: i + 1 })))
       .returning();
     return new Map(rows.map((c) => [c.name, c.id]));
   };

@@ -15,6 +15,8 @@ import {
   uuid,
 } from "drizzle-orm/pg-core";
 
+import type { MovementKind } from "@/lib/expense-buckets";
+
 const money = (name: string) => bigint(name, { mode: "bigint" });
 const ts = (name: string) => timestamp(name, { withTimezone: true, mode: "date" });
 
@@ -112,6 +114,7 @@ export const expenseCategories = pgTable("expense_categories", {
   orgId: uuid("org_id").notNull(),
   name: text("name").notNull(),
   archived: boolean("archived").notNull().default(false),
+  position: integer("position").notNull().default(100),
 });
 
 export type PaidFrom = "drawer" | "petty_cash" | "bank" | "owner";
@@ -123,8 +126,10 @@ export const expenses = pgTable("expenses", {
   businessDayId: uuid("business_day_id"),
   expenseDate: date("expense_date", { mode: "string" }).notNull(),
   categoryId: uuid("category_id").notNull(),
+  /** The expense's notes; '' when none were given. */
   description: text("description").notNull(),
   vendor: text("vendor"),
+  receiptRef: text("receipt_ref"),
   currency: text("currency").$type<Currency>().notNull(),
   amountMinor: money("amount_minor").notNull(),
   paidFrom: text("paid_from").$type<PaidFrom>().notNull(),
@@ -142,8 +147,11 @@ export const cashMovements = pgTable("cash_movements", {
   orgId: uuid("org_id").notNull(),
   businessDayId: uuid("business_day_id").notNull(),
   direction: text("direction").$type<"in" | "out">().notNull(),
+  /** Null on rows recorded before movement types existed; see movementKindOf(). */
+  kind: text("kind").$type<MovementKind>(),
   currency: text("currency").$type<Currency>().notNull(),
   amountMinor: money("amount_minor").notNull(),
+  /** Optional note; '' when none was given. */
   reason: text("reason").notNull(),
   createdBy: uuid("created_by"),
   createdAt: ts("created_at").notNull().defaultNow(),

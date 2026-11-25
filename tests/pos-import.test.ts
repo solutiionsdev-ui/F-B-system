@@ -240,8 +240,9 @@ function sampleFor(date: string) {
   const next = new Date(`${date}T00:00:00Z`);
   next.setUTCDate(next.getUTCDate() + 1);
   const n = next.toISOString().slice(0, 10).split("-");
+  // One pass, so a target date of 25/11/2026 isn't then shifted again as the sample's second day.
   return new TextEncoder().encode(
-    SAMPLE.toString("utf8").replaceAll("24/11/2026", `${d}/${m}/${y}`).replaceAll("25/11/2026", `${n[2]}/${n[1]}/${n[0]}`),
+    SAMPLE.toString("utf8").replace(/(24|25)\/11\/2026/g, (s) => (s.startsWith("24") ? `${d}/${m}/${y}` : `${n[2]}/${n[1]}/${n[0]}`)),
   );
 }
 

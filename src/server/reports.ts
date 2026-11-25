@@ -26,6 +26,7 @@ import {
   type VarianceReason,
 } from "@/db/schema";
 import { salesSummary } from "@/lib/closing";
+import { MOVEMENT_KINDS, movementKindOf, type MovementKind } from "@/lib/expense-buckets";
 import { convert, parseRate, usdEquivalent, zeroPair, type Pair } from "@/lib/money";
 import { UserError } from "./operations";
 
@@ -144,8 +145,10 @@ export type ExpenseRow = {
   locationId: string;
   locationName: string;
   category: string;
+  /** Notes; '' when none were entered. */
   description: string;
   vendor: string | null;
+  receiptRef: string | null;
   paidFrom: PaidFrom;
   currency: Currency;
   amountMinor: bigint;
@@ -239,6 +242,7 @@ export async function computePeriodReport(db: DB, scope: TenantScope, filter: Re
         category: r.category,
         description: r.e.description,
         vendor: r.e.vendor,
+        receiptRef: r.e.receiptRef,
         paidFrom: r.e.paidFrom,
         currency: r.e.currency,
         amountMinor: r.e.amountMinor,
@@ -333,6 +337,24 @@ export async function computePeriodReport(db: DB, scope: TenantScope, filter: Re
       byPaidFrom.set(e.paidFrom, pf);
     }
 
+    // ---- cash movements (bucket B: cash changes place, profit doesn't change)
+    const rateByDay = new Map(daily.map((d) => [d.dayId, d.rate]));
+    const byKind = new Map<MovementKind, { pair: Pair; eq: bigint; count: number }>();
+    for (const m of moves) {
+      const kind = movementKindOf(m);
+      const k = byKind.get(kind) ?? { pair: zeroPair(), eq: 0n, count: 0 };
+      k.pair[m.currency] += m.amountMinor;
+      k.eq += convert(m.amountMinor, m.currency, "USD", rateByDay.get(m.businessDayId)!);
+      k.count += 1;
+      byKind.set(kind, k);
+    }
+    const movementSummary = MOVEMENT_KINDS.filter((k) => byKind.has(k.kind)).map((k) => ({
+      kind: k.kind,
+      label: k.label,
+      direction: k.direction,
+      ...byKind.get(k.kind)!,
+    }));
+
     // ---- cash control
     const closed = daily.filter((d) => d.closing);
     const reasons = new Map<VarianceReason, { count: number; eq: bigint }>();
@@ -391,6 +413,8 @@ export async function computePeriodReport(db: DB, scope: TenantScope, filter: Re
       },
       categories: [...byCategory.values()].sort((a, b) => (a.eq > b.eq ? -1 : a.eq < b.eq ? 1 : a.name.localeCompare(b.name))),
       paidFrom: [...byPaidFrom.entries()].map(([k, v]) => ({ paidFrom: k, ...v })),
+      /** Safe drops, partner withdrawals and cash put in: not expenses, kept out of every expense total. */
+      movements: movementSummary,
       cash: {
         days: daily.length,
         closedDays: closed.length,

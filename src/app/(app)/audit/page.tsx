@@ -1,5 +1,6 @@
 import { notFound } from "next/navigation";
 import { Card, formatTime, PageTitle } from "@/components/ui";
+import { MOVEMENT_LABELS, movementKindOf, PAID_FROM_LABELS, type MovementKind } from "@/lib/expense-buckets";
 import { formatAmount, type Currency } from "@/lib/money";
 import { requireContext } from "@/server/auth";
 import { getDb } from "@/server/db";
@@ -32,13 +33,22 @@ function describe(table: string, op: string, oldData: Row | null, data: Row | nu
   switch (table) {
     case "exchange_rates":
       return `${Number(r.lbp_per_usd).toLocaleString("en-US")} LBP / $`;
-    case "expenses":
-      if (op === "UPDATE" && r.status === "voided") return `Voided “${r.description}”: ${r.void_reason}`;
-      return `${r.description} · ${amount}`;
+    case "expenses": {
+      const what = r.description ? String(r.description) : "expense";
+      const paid = PAID_FROM_LABELS[String(r.paid_from)];
+      if (op === "UPDATE" && r.status === "voided") return `Voided “${what}”: ${r.void_reason}`;
+      return `${what} · ${amount}${paid ? ` · ${paid}` : ""}`;
+    }
     case "sales_lines":
       return `${String(r.line_type).replace("_", " ")}${r.tender ? ` (${r.tender})` : ""} · ${amount}`;
-    case "cash_movements":
-      return `${r.direction === "in" ? "In" : "Out"}: ${r.reason} · ${amount}`;
+    case "cash_movements": {
+      const kind = movementKindOf({
+        kind: (r.kind as MovementKind | null) ?? null,
+        direction: r.direction === "in" ? "in" : "out",
+        reason: String(r.reason ?? ""),
+      });
+      return `${MOVEMENT_LABELS[kind]}${r.reason ? `: ${r.reason}` : ""} · ${amount}`;
+    }
     case "cash_counts":
       return `${r.currency} counted ${formatAmount(BigInt(String(r.counted_minor)), r.currency as Currency)}`;
     case "business_days":

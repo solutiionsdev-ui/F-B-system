@@ -1,6 +1,7 @@
 // Monthly management package as a PDF (A4). Uses PDFKit's built-in Helvetica,
 // so no font files to ship; text is kept to characters that font can draw.
 import PDFDocument from "pdfkit";
+import { PAID_FROM_LABELS } from "@/lib/expense-buckets";
 import { formatAmount, formatRate, type Currency } from "@/lib/money";
 import type { getComparison, PeriodReport } from "./reports";
 
@@ -25,12 +26,7 @@ const REASONS: Record<string, string> = {
   suspected_loss: "Suspected loss",
   other: "Other",
 };
-const PAID_FROM: Record<string, string> = {
-  drawer: "Cash drawer",
-  petty_cash: "Petty cash",
-  bank: "Bank / transfer",
-  owner: "Owner paid",
-};
+const PAID_FROM = PAID_FROM_LABELS;
 
 /** Helvetica in PDFs can't draw U+2212 or ≈, so swap them for plain equivalents. */
 const pdfText = (s: string) => s.replace(/−/g, "-").replace(/≈/g, "~");
@@ -268,8 +264,8 @@ export async function renderReportPdf(
   // ---------------------------------------------------------------- expenses
   section(
     doc,
-    "Expenses by category",
-    `Active expenses only${t.voidedExpenses ? `; ${t.voidedExpenses} voided expense(s) excluded` : ""}. Converted at the rate stored with each expense.`,
+    "Operating expenses",
+    `These reduce profit. Active expenses only${t.voidedExpenses ? `; ${t.voidedExpenses} voided expense(s) excluded` : ""}. Converted at the rate stored with each expense.`,
   );
   table(
     doc,
@@ -310,7 +306,31 @@ export async function renderReportPdf(
       .font("Helvetica")
       .fontSize(7.5)
       .fillColor(MUTED)
-      .text(`Paid from: ${r.paidFrom.map((p) => `${PAID_FROM[p.paidFrom]} ${usd(p.eq)}`).join("   |   ")}`, M, doc.y, { width: W });
+      .text(`Paid with: ${r.paidFrom.map((p) => `${PAID_FROM[p.paidFrom]} ${usd(p.eq)}`).join("   |   ")}`, M, doc.y, { width: W });
+  }
+
+  // ---------------------------------------------------------------- cash movements
+  if (r.movements.length) {
+    section(doc, "Cash movements", "Cash that changed place without being a cost. Not counted in expenses or profit.");
+    table(
+      doc,
+      [
+        { header: "Type", width: 215 },
+        { header: "Items", width: 40, align: "right" },
+        { header: "USD", width: 80, align: "right" },
+        { header: "LBP", width: 95, align: "right" },
+        { header: "~ USD", width: 85, align: "right" },
+      ],
+      r.movements.map((m) => ({
+        cells: [
+          m.direction === "in" ? `${m.label} (in)` : m.label,
+          String(m.count),
+          money(m.pair.USD, "USD"),
+          money(m.pair.LBP, "LBP"),
+          usd(m.eq),
+        ],
+      })),
+    );
   }
 
   // ---------------------------------------------------------------- cash control
