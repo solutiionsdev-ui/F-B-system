@@ -6,6 +6,7 @@ import { migration0005 } from "./0005_discard_drafts";
 import { migration0006 } from "./0006_hosted_postgres";
 import { migration0007 } from "./0007_expense_buckets";
 import { migration0008 } from "./0008_closing_rules";
+import { migration0009 } from "./0009_branches_access";
 
 // Append new migrations to the end. Never edit one that has shipped.
 export const migrations: { id: string; sql: string }[] = [
@@ -17,4 +18,5 @@ export const migrations: { id: string; sql: string }[] = [
   { id: "0006_hosted_postgres", sql: migration0006 },
   { id: "0007_expense_buckets", sql: migration0007 },
   { id: "0008_closing_rules", sql: migration0008 },
+  { id: "0009_branches_access", sql: migration0009 },
 ];

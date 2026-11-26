@@ -15,6 +15,9 @@ type Props = {
   groups: NavGroup[];
   org: { id: string; name: string; subtitle: string };
   orgs: { id: string; label: string }[];
+  /** Venues this person may see; the branch picked applies to every screen. */
+  branches: { id: string; label: string }[];
+  branchId: string | null;
   user: { id: string; name: string; role: string };
   demoUsers: { id: string; name: string }[] | null;
 };
@@ -35,7 +38,52 @@ function initials(name: string) {
     .join("");
 }
 
-function SidebarBody({ groups, org, orgs, user, demoUsers, onNavigate }: Props & { onNavigate?: () => void }) {
+/** All branches or one, remembered for every screen. A GET form, so it works before scripts load. */
+function BranchSwitcher({ branches, branchId }: { branches: Props["branches"]; branchId: string | null }) {
+  if (branches.length === 0) {
+    return <p className="mt-2 px-1 text-xs text-amber-700">No venues assigned to you yet. Ask an owner.</p>;
+  }
+  if (branches.length === 1) {
+    return (
+      <div className="mt-2 flex items-center gap-2 rounded-lg px-1 text-[13px] text-stone-600">
+        <Icon name="door" size={14} className="text-stone-400" />
+        <span className="truncate">{branches[0].label}</span>
+      </div>
+    );
+  }
+  return (
+    <form action="/branch" method="get" className="relative mt-2">
+      <input type="hidden" name="next" defaultValue="/" />
+      <label htmlFor="branch-switcher" className="mb-1 block px-1 font-mono text-[10.5px] font-medium uppercase tracking-[0.08em] text-stone-400">
+        Branch
+      </label>
+      <select
+        id="branch-switcher"
+        name="location"
+        defaultValue={branchId ?? ""}
+        onChange={(e) => {
+          const form = e.currentTarget.form!;
+          (form.elements.namedItem("next") as HTMLInputElement).value = window.location.pathname + window.location.search;
+          form.requestSubmit();
+        }}
+        className="w-full appearance-none rounded-lg border border-stone-200/80 bg-white py-1.5 pl-2.5 pr-8 text-[13px] text-stone-900 focus:outline-none focus:ring-4 focus:ring-brand-500/15"
+      >
+        <option value="">All branches consolidated</option>
+        {branches.map((b) => (
+          <option key={b.id} value={b.id}>
+            {b.label}
+          </option>
+        ))}
+      </select>
+      <span className="pointer-events-none absolute bottom-1.5 right-3 text-stone-400">⌄</span>
+      <noscript>
+        <button className="mt-1 text-xs text-stone-600 underline">Show</button>
+      </noscript>
+    </form>
+  );
+}
+
+function SidebarBody({ groups, org, orgs, branches, branchId, user, demoUsers, onNavigate }: Props & { onNavigate?: () => void }) {
   const pathname = usePathname();
   return (
     <div className="flex h-full flex-col">
@@ -72,6 +120,7 @@ function SidebarBody({ groups, org, orgs, user, demoUsers, onNavigate }: Props &
             <div className="text-xs text-stone-500">{org.subtitle}</div>
           </div>
         )}
+        <BranchSwitcher branches={branches} branchId={branchId} />
       </div>
 
       <nav className="mt-5 flex-1 space-y-5 overflow-y-auto px-3" aria-label="Main">

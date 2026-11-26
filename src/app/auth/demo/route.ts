@@ -28,5 +28,5 @@ export async function GET(req: NextRequest) {
   await signOut();
   await createSession(userId);
   const next = sp.get("next");
-  redirect(next && next.startsWith("/") && !next.startsWith("//") ? next : "/");
+  redirect(next && next.startsWith("/") && !next.startsWith("//") && !next.startsWith("/\\") ? next : "/");
 }

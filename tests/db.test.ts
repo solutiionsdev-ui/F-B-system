@@ -4,7 +4,7 @@
 // immutable history and duplicate protection.
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { and, eq, sql } from "drizzle-orm";
-import { migrate, openPglite, withTenant, type Database, type TenantScope } from "@/db/database";
+import { loadScope, migrate, openPglite, withTenant, type Database, type TenantScope } from "@/db/database";
 import { seedDemo } from "@/db/seed";
 import {
   auditLog,
@@ -168,11 +168,16 @@ describe("roles", () => {
     );
   });
 
-  it("hides the audit trail from managers", async () => {
-    const rows = await withTenant(database.db, cafe, (tx) => tx.select().from(auditLog).limit(5));
-    expect(rows).toHaveLength(0);
-    const ownerRows = await withTenant(database.db, cafeOwner, (tx) => tx.select().from(auditLog).limit(5));
-    expect(ownerRows.length).toBeGreaterThan(0);
+  it("gives managers a limited audit trail: their venues' records, no team or business-wide changes", async () => {
+    const rows = await withTenant(database.db, cafe, (tx) => tx.select().from(auditLog));
+    expect(rows.length).toBeGreaterThan(0);
+    for (const r of rows) {
+      expect(["memberships", "membership_locations", "invitations", "exchange_rates", "organizations", "expense_categories"]).not.toContain(
+        r.tableName,
+      );
+    }
+    const ownerRows = await withTenant(database.db, cafeOwner, (tx) => tx.select().from(auditLog));
+    expect(ownerRows.some((r) => r.tableName === "memberships")).toBe(true);
   });
 });
 
@@ -209,13 +214,19 @@ describe("closed days", () => {
     );
   });
 
-  it("accept corrections as adjustments from owners and accountants only", async () => {
+  it("accept corrections from owners, and from accountants only once an owner allows it", async () => {
     const [closed] = await database.db
       .select()
       .from(businessDays)
       .where(and(eq(businessDays.orgId, cafe.orgId), eq(businessDays.status, "closed")))
       .limit(1);
-    await addAdjustment(database.db, cafeAccountant, {
+    const correction = { dayId: closed.id, currency: "LBP" as const, amountMinor: 1_790_000n, reason: "Plumber receipt found" };
+    await expect(addAdjustment(database.db, cafeAccountant, correction)).rejects.toThrow(UserError);
+    await database.db
+      .update(memberships)
+      .set({ permissions: { post_corrections: true } })
+      .where(and(eq(memberships.userId, cafeAccountant.userId), eq(memberships.orgId, cafe.orgId)));
+    await addAdjustment(database.db, (await loadScope(database.db, cafeAccountant.userId, cafe.orgId))!, {
       dayId: closed.id,
       currency: "LBP",
       amountMinor: 1_790_000n,

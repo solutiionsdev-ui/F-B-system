@@ -5,6 +5,7 @@ import { and, asc, eq, isNull } from "drizzle-orm";
 import { type DB, type TenantScope, withTenant } from "@/db/database";
 import { invitations, posImports, locations } from "@/db/schema";
 import { withinAllowance } from "@/lib/closing";
+import { can } from "@/lib/permissions";
 import { formatAmount, parseRate, type Pair } from "@/lib/money";
 import type { IconName } from "@/components/icons";
 import { getStatusSummary } from "./day-status";
@@ -78,29 +79,33 @@ export function greeting(now = new Date()) {
   return hour < 12 ? "Good morning" : hour < 18 ? "Good afternoon" : "Good evening";
 }
 
-export async function getToday(db: DB, scope: TenantScope, today = todayIn()) {
+/** `locationId`: the branch picked in the sidebar, or null for every branch the person may see. */
+export async function getToday(db: DB, scope: TenantScope, today = todayIn(), locationId: string | null = null) {
   const from = shiftDate(today, -13);
   const weekStart = shiftDate(today, -6);
   const monthStart = `${today.slice(0, 8)}01`;
-  const dash = await getDashboard(db, scope, today);
-  const report = await computePeriodReport(db, scope, { from, to: today });
+  const dash = await getDashboard(db, scope, today, locationId);
+  const report = await computePeriodReport(db, scope, { from, to: today, locationId });
   // Month to date, through the same status query Reports and Cash Closing use.
-  const status = await getStatusSummary(db, scope, { from: monthStart, to: today });
+  const status = await getStatusSummary(db, scope, { from: monthStart, to: today, locationId });
   const days = dailyTotals(report);
   const byDate = new Map(days.map((d) => [d.date, d]));
-  const ops = scope.role === "owner" || scope.role === "manager";
-  const books = scope.role === "owner" || scope.role === "accountant";
+  const canClose = can(scope, "close_days");
+  const canImport = can(scope, "import_pos");
+  const canReports = can(scope, "view_reports");
+  // Flagged days are reviewed by owners and accountants (spec: "owner review").
+  const reviews = scope.role !== "manager";
   const tol: Pair = { USD: dash.org.toleranceUsdCents, LBP: dash.org.toleranceLbp };
   /** A closed day whose difference is still outside the allowance after corrections. */
   const unresolved = (d: (typeof report.daily)[number]) => d.varianceAfter != null && !withinAllowance(d.varianceAfter, tol);
 
   const extras = await withTenant(db, scope, async (tx) => {
-    const drafts = ops
+    const drafts = canImport
       ? await tx
           .select({ id: posImports.id, fileName: posImports.fileName, rowCount: posImports.rowCount, locationName: locations.name })
           .from(posImports)
           .innerJoin(locations, eq(locations.id, posImports.locationId))
-          .where(eq(posImports.status, "draft"))
+          .where(and(eq(posImports.status, "draft"), locationId ? eq(posImports.locationId, locationId) : undefined))
           .orderBy(asc(posImports.createdAt))
       : [];
     const invites =
@@ -175,8 +180,11 @@ export async function getToday(db: DB, scope: TenantScope, today = todayIn()) {
       icon: "alert",
       lead: `${loc.name} came up short ${short.length} times in the last 14 days.`,
       text: `${pairText(total)} missing in total${top ? `; most often "${REASONS[top[0]]}"` : ""}. Worth a word with whoever closes there.`,
-      action: books
-        ? { label: "See those days", href: `/reports?from=${from}&to=${today}&location=${loc.id}` }
+      action: canReports
+        ? {
+            label: "See those days",
+            href: `/branch?${new URLSearchParams({ location: loc.id, next: `/reports?from=${from}&to=${today}` })}`,
+          }
         : { label: "Review the latest", href: `/days/${latest.dayId}` },
     });
   }
@@ -198,7 +206,7 @@ export async function getToday(db: DB, scope: TenantScope, today = todayIn()) {
         icon: "cash",
         lead: `Expenses are up ${expPct.toFixed(0)}% on the week before.`,
         text: `${usd(expLast)} this week against ${usd(expPrev)}. Biggest: ${cat}, ${usd(amt)}.`,
-        action: books ? { label: "Open reports", href: `/reports?from=${weekStart}&to=${today}` } : undefined,
+        action: canReports ? { label: "Open reports", href: `/reports?from=${weekStart}&to=${today}` } : undefined,
       });
     }
     const salesLast = sum(lastDays, (d) => d.salesEq.collected);
@@ -211,7 +219,7 @@ export async function getToday(db: DB, scope: TenantScope, today = todayIn()) {
         icon: "reports",
         lead: `Sales are ${salesPct > 0 ? "up" : "down"} ${Math.abs(salesPct).toFixed(0)}% on the week before.`,
         text: `${usd(salesLast)} collected in the last 7 days against ${usd(salesPrev)}.`,
-        action: books ? { label: "Open reports", href: `/reports?from=${weekStart}&to=${today}` } : undefined,
+        action: canReports ? { label: "Open reports", href: `/reports?from=${weekStart}&to=${today}` } : undefined,
       });
     }
   }
@@ -255,11 +263,11 @@ export async function getToday(db: DB, scope: TenantScope, today = todayIn()) {
         : "Count the drawer when service ends, then close the day.",
       href: `/days/${d.id}`,
       icon: "cash",
-      actions: ops ? [{ kind: "link", label: "Count now", href: `/days/${d.id}#count`, primary: true }] : [],
+      actions: canClose ? [{ kind: "link", label: "Count now", href: `/days/${d.id}#count`, primary: true }] : [],
       rank: stale ? 1 : 3,
     });
   }
-  if (books) {
+  if (reviews) {
     for (const d of weekFlagged) {
       const v = d.varianceAfter!;
       items.push({
@@ -276,7 +284,7 @@ export async function getToday(db: DB, scope: TenantScope, today = todayIn()) {
       });
     }
   }
-  if (ops) {
+  if (canClose || canImport) {
     for (const loc of dash.locations) {
       if (dash.todayByLocation[loc.id]) continue;
       items.push({
@@ -290,8 +298,8 @@ export async function getToday(db: DB, scope: TenantScope, today = todayIn()) {
         icon: "door",
         actions: dash.rate
           ? [
-              { kind: "open", locationId: loc.id, label: "Open today" },
-              { kind: "link", label: "Import POS file", href: "/import" },
+              ...(canClose ? [{ kind: "open" as const, locationId: loc.id, label: "Open today" }] : []),
+              ...(canImport ? [{ kind: "link" as const, label: "Import POS file", href: "/import" }] : []),
             ]
           : [],
         rank: 5,

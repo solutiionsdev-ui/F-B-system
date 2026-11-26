@@ -12,10 +12,10 @@ import {
   REASON_LABELS,
 } from "@/components/ui";
 import { formatAmount, formatRate, type Pair } from "@/lib/money";
-import { requireContext } from "@/server/auth";
+import { branchLabel, requireContext } from "@/server/auth";
 import { getDb } from "@/server/db";
 import { todayIn, UserError } from "@/server/operations";
-import { dailyTotals, getComparison, getPeriodReport, REPORT_ROLES, type PeriodReport } from "@/server/reports";
+import { dailyTotals, getComparison, getPeriodReport, type PeriodReport } from "@/server/reports";
 import { PeriodFilter, readPeriod, type PeriodSearch } from "@/components/period-filter";
 import { TrendChart } from "@/components/charts/trend-chart";
 import { CashCalendar } from "@/components/charts/cash-calendar";
@@ -27,12 +27,12 @@ function change(cur: bigint, prev: bigint | undefined) {
 
 export default async function ReportsPage({ searchParams }: { searchParams: Promise<PeriodSearch> }) {
   const ctx = await requireContext();
-  if (!REPORT_ROLES.includes(ctx.active.role)) {
+  if (!ctx.can("view_reports")) {
     return (
       <>
         <PageTitle title="Reports" />
         <Card>
-          <p className="text-sm text-stone-600">Reports are available to owners and accountants.</p>
+          <p className="text-sm text-stone-600">You don&apos;t have access to reports. Ask an owner.</p>
         </Card>
       </>
     );
@@ -40,7 +40,7 @@ export default async function ReportsPage({ searchParams }: { searchParams: Prom
 
   const sp = await searchParams;
   const today = todayIn();
-  const filter = readPeriod(sp, today);
+  const filter = readPeriod(sp, today, ctx.branch?.id ?? null);
   const db = await getDb();
   let report: PeriodReport;
   let comparison: Awaited<ReturnType<typeof getComparison>> | null;
@@ -75,7 +75,7 @@ export default async function ReportsPage({ searchParams }: { searchParams: Prom
         title="Reports"
         subtitle={
           <>
-            {formatDate(report.filter.from)} to {formatDate(report.filter.to)} · {report.location?.name ?? "All locations"}
+            {formatDate(report.filter.from)} to {formatDate(report.filter.to)} · {report.location?.name ?? "All branches"}
             {report.rates.min != null && (
               <>
                 {" "}
@@ -86,21 +86,23 @@ export default async function ReportsPage({ searchParams }: { searchParams: Prom
           </>
         }
         actions={
-          <div className="flex flex-wrap gap-2">
-            <a href={exportUrl({ format: "pdf" })} className={buttonClass("primary")} download>
-              Download PDF
-            </a>
-            <a href={exportUrl({ format: "csv", kind: "daily" })} className={buttonClass("secondary")} download>
-              Daily CSV
-            </a>
-            <a href={exportUrl({ format: "csv", kind: "expenses" })} className={buttonClass("secondary")} download>
-              Expenses CSV
-            </a>
-          </div>
+          ctx.can("export_reports") && (
+            <div className="flex flex-wrap gap-2">
+              <a href={exportUrl({ format: "pdf" })} className={buttonClass("primary")} download>
+                Download PDF
+              </a>
+              <a href={exportUrl({ format: "csv", kind: "daily" })} className={buttonClass("secondary")} download>
+                Daily CSV
+              </a>
+              <a href={exportUrl({ format: "csv", kind: "expenses" })} className={buttonClass("secondary")} download>
+                Expenses CSV
+              </a>
+            </div>
+          )
         }
       />
 
-      <PeriodFilter basePath="/reports" filter={report.filter} locations={report.locations} today={today} />
+      <PeriodFilter basePath="/reports" filter={report.filter} branchLabel={branchLabel(ctx)} today={today} />
 
       {c.openDays.length > 0 && (
         <div className="mb-6 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">

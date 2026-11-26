@@ -7,6 +7,7 @@ import {
   exchangeRates,
   expenseCategories,
   locations,
+  membershipLocations,
   memberships,
   organizations,
   users,
@@ -173,21 +174,29 @@ async function seedBase(db: DB) {
       { email: "bistro@demo.test", name: "Elie (Bistro owner)", passwordHash },
     ])
     .returning();
-  await db.insert(memberships).values([
+  const ms = await db.insert(memberships).values([
     { userId: owner.id, orgId: cafe.id, role: "owner" },
     { userId: manager.id, orgId: cafe.id, role: "manager" },
     { userId: accountant.id, orgId: cafe.id, role: "accountant" },
     { userId: accountant.id, orgId: bistro.id, role: "accountant" },
     { userId: owner2.id, orgId: bistro.id, role: "owner" },
-  ]);
+  ]).returning();
   const [hamra, gemmayzeh] = await db
     .insert(locations)
     .values([
-      { orgId: cafe.id, name: "Hamra" },
-      { orgId: cafe.id, name: "Gemmayzeh" },
+      { orgId: cafe.id, name: "Hamra", venueType: "cafe" },
+      { orgId: cafe.id, name: "Gemmayzeh", venueType: "restaurant" },
     ])
     .returning();
-  const [marMikhael] = await db.insert(locations).values({ orgId: bistro.id, name: "Mar Mikhael" }).returning();
+  const [marMikhael] = await db.insert(locations).values({ orgId: bistro.id, name: "Mar Mikhael", venueType: "pub" }).returning();
+  // Owners see every venue. Karim manages both cafe venues; Nadine was invited to every venue of both clients.
+  await db.insert(membershipLocations).values([
+    { membershipId: ms[1].id, locationId: hamra.id, orgId: cafe.id },
+    { membershipId: ms[1].id, locationId: gemmayzeh.id, orgId: cafe.id },
+    { membershipId: ms[2].id, locationId: hamra.id, orgId: cafe.id },
+    { membershipId: ms[2].id, locationId: gemmayzeh.id, orgId: cafe.id },
+    { membershipId: ms[3].id, locationId: marMikhael.id, orgId: bistro.id },
+  ]);
 
   const categories = async (orgId: string) => {
     const rows = await db

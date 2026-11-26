@@ -118,9 +118,9 @@ describe("insights", () => {
     const insight = after.insights.find((i) => i.key === `short-${hamraId}`)!;
     expect(insight.lead).toBe("Hamra came up short 2 times in the last 14 days.");
     expect(insight.action?.href).toContain(`location=${hamraId}`);
-    // Managers get a link to the day instead of reports.
+    // Managers see reports for their own venues too; the link switches the branch first.
     const forManager = await getToday(database.db, manager);
-    expect(forManager.insights.find((i) => i.key === `short-${hamraId}`)!.action?.href).toMatch(/^\/days\//);
+    expect(forManager.insights.find((i) => i.key === `short-${hamraId}`)!.action?.href).toMatch(/^\/branch\?location=/);
     expect(after.insights.length).toBeLessThanOrEqual(2);
   });
 });

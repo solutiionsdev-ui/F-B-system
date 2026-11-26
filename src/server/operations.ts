@@ -29,6 +29,7 @@ import {
 } from "@/db/schema";
 import { computeExpected, reconcile, salesSummary } from "@/lib/closing";
 import { dayStatusOf } from "@/lib/day-status";
+import { can, type Permission } from "@/lib/permissions";
 import { pickRateForDate } from "@/lib/rates";
 import { isMovementKind, movementDirection, type MovementKind } from "@/lib/expense-buckets";
 import { CURRENCIES, countTotal, parseRate, rateToDb, RATE_SCALE, type Pair } from "@/lib/money";
@@ -42,16 +43,25 @@ export function todayIn(timeZone = BEIRUT_TZ, now = new Date()): string {
   return new Intl.DateTimeFormat("en-CA", { timeZone, year: "numeric", month: "2-digit", day: "2-digit" }).format(now);
 }
 
-function requireRole(scope: TenantScope, allowed: Role[], action: string) {
-  if (!allowed.includes(scope.role)) {
-    throw new UserError(`Your role (${scope.role}) can't ${action}.`);
-  }
+/** Checks the permission matrix (lib/permissions.ts); the database checks it again. */
+export function requirePermission(scope: TenantScope, permission: Permission, action: string) {
+  if (!can(scope, permission)) throw new UserError(`You don't have permission to ${action}.`);
 }
 
-const OPS: Role[] = ["owner", "manager"];
+/**
+ * Serializes everything that writes to one business day (entries, counts,
+ * imports, closing), so nothing can slip in while the day is being closed.
+ * An advisory lock rather than SELECT ... FOR UPDATE, which the database would
+ * treat as editing the day itself and refuse to people who may only add
+ * entries to it.
+ */
+export async function lockDay(tx: Tx, dayId: string) {
+  await tx.execute(sql`select pg_advisory_xact_lock(727102, hashtext(${dayId}))`);
+}
 
 async function loadOpenDay(tx: Tx, dayId: string) {
-  const [day] = await tx.select().from(businessDays).where(eq(businessDays.id, dayId)).for("update");
+  await lockDay(tx, dayId);
+  const [day] = await tx.select().from(businessDays).where(eq(businessDays.id, dayId));
   if (!day) throw new UserError("That business day doesn't exist.");
   if (day.status === "closed") throw new UserError("This day is closed. Record a correction as an adjustment instead.");
   return day;
@@ -83,7 +93,7 @@ export async function setRate(
   scope: TenantScope,
   input: { lbpPerUsd: string; source: "market" | "bank" | "custom"; note?: string },
 ) {
-  requireRole(scope, OPS, "change the exchange rate");
+  requirePermission(scope, "change_rate", "change the exchange rate");
   const rate = parseRate(input.lbpPerUsd);
   if (rate < 1_000n * RATE_SCALE || rate > 1_000_000n * RATE_SCALE) {
     throw new UserError("That rate looks wrong. Enter LBP per 1 USD, for example 89,500.");
@@ -128,11 +138,12 @@ export async function openDay(
   scope: TenantScope,
   input: { locationId: string; businessDate: string; openingFloat: Pair },
 ) {
-  requireRole(scope, OPS, "open a business day");
+  requirePermission(scope, "close_days", "open a business day");
   if (!/^\d{4}-\d{2}-\d{2}$/.test(input.businessDate)) throw new UserError("Pick a valid business date.");
   return withTenant(db, scope, async (tx) => {
     const [location] = await tx.select().from(locations).where(eq(locations.id, input.locationId));
     if (!location) throw new UserError("Pick a location.");
+    if (location.status === "archived") throw new UserError(`${location.name} is archived. Restore it in Settings to open days there.`);
     const choice = await rateForBusinessDate(tx, input.businessDate, location.timezone);
     if (!choice) throw new UserError("Set today's exchange rate before opening a day.");
     const rate = choice.rate;
@@ -159,7 +170,7 @@ export async function openDay(
 
 /** Corrects the cash the drawer started with (e.g. a day opened by a POS import). */
 export async function setOpeningFloat(db: DB, scope: TenantScope, dayId: string, float: Pair) {
-  requireRole(scope, OPS, "change the opening float");
+  requirePermission(scope, "close_days", "change the opening float");
   if (float.USD < 0n || float.LBP < 0n) throw new UserError("The opening float can't be negative.");
   return withTenant(db, scope, async (tx) => {
     const day = await loadOpenDay(tx, dayId);
@@ -183,7 +194,7 @@ export type SalesTotalsInput = {
 
 /** Replaces the hand-entered POS end-of-day totals for a day. */
 export async function saveManualSales(db: DB, scope: TenantScope, dayId: string, totals: SalesTotalsInput) {
-  requireRole(scope, OPS, "enter sales");
+  requirePermission(scope, "import_pos", "enter sales");
   return withTenant(db, scope, async (tx) => {
     const day = await loadOpenDay(tx, dayId);
     const [imported] = await tx
@@ -243,7 +254,7 @@ export async function addExpense(
     paidFrom: PaidFrom;
   },
 ) {
-  requireRole(scope, OPS, "record expenses");
+  requirePermission(scope, "record_transactions", "record expenses");
   if (input.amountMinor <= 0n) throw new UserError("Enter an amount greater than zero.");
   if (!input.categoryId) throw new UserError("Pick a category for the expense.");
   return withTenant(db, scope, async (tx) => {
@@ -273,7 +284,7 @@ export async function addExpense(
 }
 
 export async function voidExpense(db: DB, scope: TenantScope, expenseId: string, reason: string) {
-  requireRole(scope, OPS, "void expenses");
+  requirePermission(scope, "record_transactions", "void expenses");
   if (!reason.trim()) throw new UserError("Say why the expense is being voided.");
   return withTenant(db, scope, async (tx) => {
     const [exp] = await tx.select().from(expenses).where(eq(expenses.id, expenseId));
@@ -291,7 +302,7 @@ export async function addMovement(
   scope: TenantScope,
   input: { dayId: string; kind: MovementKind; currency: Currency; amountMinor: bigint; reason?: string },
 ) {
-  requireRole(scope, OPS, "record cash movements");
+  requirePermission(scope, "record_transactions", "record cash movements");
   if (!isMovementKind(input.kind)) throw new UserError("Pick what kind of cash movement this is.");
   if (input.amountMinor <= 0n) throw new UserError("Enter an amount greater than zero.");
   const reason = input.reason?.trim() ?? "";
@@ -312,7 +323,7 @@ export async function addMovement(
 }
 
 export async function deleteMovement(db: DB, scope: TenantScope, movementId: string) {
-  requireRole(scope, OPS, "remove cash movements");
+  requirePermission(scope, "record_transactions", "remove cash movements");
   return withTenant(db, scope, async (tx) => {
     await tx.delete(cashMovements).where(eq(cashMovements.id, movementId));
   });
@@ -325,7 +336,7 @@ export async function saveCount(
   scope: TenantScope,
   input: { dayId: string; currency: Currency; denominations: Record<string, number>; looseMinor: bigint },
 ) {
-  requireRole(scope, OPS, "count the drawer");
+  requirePermission(scope, "close_days", "count the drawer");
   const counts = Object.fromEntries(Object.entries(input.denominations).filter(([, q]) => q > 0));
   const total = countTotal(counts, input.currency, input.looseMinor);
   return withTenant(db, scope, async (tx) => {
@@ -423,7 +434,7 @@ export async function closeDay(
   dayId: string,
   input: { reason?: VarianceReason | null; note?: string; noSalesReason?: string },
 ) {
-  requireRole(scope, OPS, "close a business day");
+  requirePermission(scope, "close_days", "close a business day");
   return withTenant(db, scope, async (tx) => {
     const day = await loadOpenDay(tx, dayId);
     const d = await computeDay(tx, day);
@@ -474,7 +485,7 @@ export async function addAdjustment(
   scope: TenantScope,
   input: { dayId: string; currency: Currency; amountMinor: bigint; reason: string },
 ) {
-  requireRole(scope, ["owner", "accountant"], "post adjustments");
+  requirePermission(scope, "post_corrections", "post corrections on closed days");
   if (input.amountMinor === 0n) throw new UserError("Enter a non-zero amount.");
   if (!input.reason.trim()) throw new UserError("Explain the correction.");
   return withTenant(db, scope, async (tx) => {
@@ -538,10 +549,20 @@ export function listLocations(db: DB, scope: TenantScope) {
   return withTenant(db, scope, (tx) => tx.select().from(locations).orderBy(asc(locations.name)));
 }
 
-export function getDashboard(db: DB, scope: TenantScope, today = todayIn()) {
+/**
+ * The Today page's lists. `locationId` is the branch picked in the sidebar
+ * (null for all branches); row-level security already limits everything to
+ * the venues this person may see.
+ */
+export function getDashboard(db: DB, scope: TenantScope, today = todayIn(), locationId: string | null = null) {
   return withTenant(db, scope, async (tx) => {
     const [org] = await tx.select().from(organizations).where(eq(organizations.id, scope.orgId));
-    const locs = await tx.select().from(locations).orderBy(asc(locations.name));
+    const locs = await tx
+      .select()
+      .from(locations)
+      .where(and(eq(locations.status, "active"), locationId ? eq(locations.id, locationId) : undefined))
+      .orderBy(asc(locations.name));
+    const atBranch = locationId ? eq(businessDays.locationId, locationId) : undefined;
     const rate = await currentRate(tx);
     const dayRow = {
       id: businessDays.id,
@@ -568,18 +589,20 @@ export function getDashboard(db: DB, scope: TenantScope, today = todayIn()) {
       dayStatus: dayStatusOf(r, r.withinTolerance == null ? null : { withinTolerance: r.withinTolerance }),
     });
     // The recent table is a display list, so it's capped. Open days and today's days are not.
-    const recent = (await base().orderBy(desc(businessDays.businessDate), asc(locations.name)).limit(30)).map(withStatus);
-    const openDays = (await base().where(eq(businessDays.status, "open")).orderBy(asc(businessDays.businessDate), asc(locations.name))).map(
-      withStatus,
-    );
-    const todays = (await base().where(eq(businessDays.businessDate, today))).map(withStatus);
+    const recent = (await base().where(atBranch).orderBy(desc(businessDays.businessDate), asc(locations.name)).limit(30)).map(withStatus);
+    const openDays = (
+      await base()
+        .where(and(eq(businessDays.status, "open"), atBranch))
+        .orderBy(asc(businessDays.businessDate), asc(locations.name))
+    ).map(withStatus);
+    const todays = (await base().where(and(eq(businessDays.businessDate, today), atBranch))).map(withStatus);
     const todayByLocation = Object.fromEntries(todays.map((r) => [r.locationId, r]));
     return { org, locations: locs, rate, recent, todayByLocation, openDays, today };
   });
 }
 
 export function getAuditTrail(db: DB, scope: TenantScope, limit = 100) {
-  requireRole(scope, ["owner", "accountant"], "view the audit trail");
+  requirePermission(scope, "view_audit", "see the audit trail");
   return withTenant(db, scope, (tx) =>
     tx
       .select({
@@ -638,11 +661,17 @@ export async function getClientOverview(db: DB, userId: string, memberships: { o
 
 
 /** Small numbers for the sidebar badges, plus the group's plan. */
-export function getNavCounts(db: DB, scope: TenantScope) {
+export function getNavCounts(db: DB, scope: TenantScope, locationId: string | null = null) {
   return withTenant(db, scope, async (tx) => {
     const [org] = await tx.select({ plan: organizations.plan }).from(organizations).where(eq(organizations.id, scope.orgId));
-    const [{ n: openDays }] = await tx.select({ n: count() }).from(businessDays).where(eq(businessDays.status, "open"));
-    const [{ n: importDrafts }] = await tx.select({ n: count() }).from(posImports).where(eq(posImports.status, "draft"));
+    const [{ n: openDays }] = await tx
+      .select({ n: count() })
+      .from(businessDays)
+      .where(and(eq(businessDays.status, "open"), locationId ? eq(businessDays.locationId, locationId) : undefined));
+    const [{ n: importDrafts }] = await tx
+      .select({ n: count() })
+      .from(posImports)
+      .where(and(eq(posImports.status, "draft"), locationId ? eq(posImports.locationId, locationId) : undefined));
     // Invitations are only visible to owners (row-level security returns 0 for others).
     const [{ n: pendingInvites }] = await tx
       .select({ n: count() })

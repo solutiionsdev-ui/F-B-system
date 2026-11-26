@@ -1,4 +1,4 @@
-import { addLocationAction, renameLocationAction, setRateAction, updateSettingsAction } from "@/app/actions";
+import { addLocationAction, setLocationStatusAction, setRateAction, updateLocationAction, updateSettingsAction } from "@/app/actions";
 import { ActionForm } from "@/components/action-form";
 import { Badge, Card, Field, formatTime, inputClass, Money, PageTitle } from "@/components/ui";
 import { CATEGORY_HINTS } from "@/lib/expense-buckets";
@@ -7,9 +7,12 @@ import { requireContext } from "@/server/auth";
 import { getDb } from "@/server/db";
 import { getEntryOptions } from "@/server/ledgers";
 import { getDashboard, listRates } from "@/server/operations";
-import { getTeam, PLAN_LIMITS } from "@/server/team";
+import { getTeam, PLAN_LIMITS, VENUE_TYPES } from "@/server/team";
 
 const SOURCE_LABEL = { market: "Market", bank: "Bank", custom: "House rate" } as const;
+const VENUE_LABEL = Object.fromEntries(VENUE_TYPES.map((v) => [v.value, v.label])) as Record<string, string>;
+/** When the business day ends: sales before this hour count for the previous day. */
+const CUTOFF_HOURS = Array.from({ length: 12 }, (_, h) => ({ value: h, label: h === 0 ? "Midnight" : `${String(h).padStart(2, "0")}:00` }));
 
 const fmtDate = (d: Date) =>
   new Intl.DateTimeFormat("en-GB", { day: "numeric", month: "short", year: "numeric", timeZone: "Asia/Beirut" }).format(d);
@@ -19,9 +22,8 @@ const sectionTitle = "mb-3 text-[15px] font-semibold tracking-tight text-stone-9
 export default async function SettingsPage() {
   const ctx = await requireContext();
   const db = await getDb();
-  const role = ctx.active.role;
-  const owner = role === "owner";
-  const canSetRate = owner || role === "manager";
+  const owner = ctx.can("manage_team");
+  const canSetRate = ctx.can("change_rate");
 
   const [rates, entry, dash, team] = await Promise.all([
     listRates(db, ctx.scope),
@@ -174,40 +176,94 @@ export default async function SettingsPage() {
               <>
                 <ul className="-mx-5 -mt-4 mb-4 divide-y divide-stone-100 border-b border-stone-100">
                   {team.locations.map((l) => (
-                    <li key={l.id} className="px-5 py-3">
-                      <ActionForm
-                        action={renameLocationAction}
-                        submitLabel="Rename"
-                        variant="ghost"
-                        className="flex items-center gap-2"
-                        footerClassName="flex-nowrap"
-                      >
+                    <li key={l.id} className={`space-y-2 px-5 py-4 ${l.status === "archived" ? "bg-stone-50/70" : ""}`}>
+                      <ActionForm action={updateLocationAction} submitLabel="Save" variant="secondary" className="space-y-2">
                         <input type="hidden" name="locationId" value={l.id} />
-                        <input name="name" defaultValue={l.name} aria-label={`Name of ${l.name}`} className={`${inputClass} py-1.5`} />
+                        <div className="grid grid-cols-2 gap-2">
+                          <Field label="Name" className="col-span-2">
+                            <input name="name" defaultValue={l.name} className={`${inputClass} py-1.5`} required />
+                          </Field>
+                          <Field label="Type">
+                            <select name="venueType" defaultValue={l.venueType} className={`${inputClass} py-1.5`}>
+                              {VENUE_TYPES.map((v) => (
+                                <option key={v.value} value={v.value}>
+                                  {v.label}
+                                </option>
+                              ))}
+                            </select>
+                          </Field>
+                          <Field label="Business day ends">
+                            <select name="dayCutoffHour" defaultValue={String(l.dayCutoffHour)} className={`${inputClass} py-1.5`}>
+                              {CUTOFF_HOURS.map((h) => (
+                                <option key={h.value} value={h.value}>
+                                  {h.label}
+                                </option>
+                              ))}
+                            </select>
+                          </Field>
+                        </div>
                       </ActionForm>
-                      <div className="mt-1 text-xs text-stone-500">
-                        {l.days} business day{l.days === 1 ? "" : "s"} · added {fmtDate(l.createdAt)}
+                      <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-stone-500">
+                        <span>
+                          {l.status === "archived" && (
+                            <>
+                              <Badge>Archived</Badge>{" "}
+                            </>
+                          )}
+                          {l.days} business day{l.days === 1 ? "" : "s"} · added {fmtDate(l.createdAt)}
+                        </span>
+                        <ActionForm
+                          action={setLocationStatusAction}
+                          submitLabel={l.status === "archived" ? "Restore" : "Archive"}
+                          variant="ghost"
+                          confirmText={
+                            l.status === "archived"
+                              ? undefined
+                              : `Archive ${l.name}? It disappears from day-to-day screens; its history stays in reports. You can restore it later.`
+                          }
+                        >
+                          <input type="hidden" name="locationId" value={l.id} />
+                          <input type="hidden" name="status" value={l.status === "archived" ? "active" : "archived"} />
+                        </ActionForm>
                       </div>
                     </li>
                   ))}
                 </ul>
+                <p className="mb-4 text-xs text-stone-500">
+                  Sales before the business day&apos;s end time count for the previous day. New POS imports for a location start from its
+                  end time.
+                </p>
                 {team.usage.locations >= team.limits.locations ? (
                   <p className="text-sm text-stone-500">
                     The {plan.label} plan includes {team.limits.locations} location{team.limits.locations === 1 ? "" : "s"}. Contact us to upgrade.
                   </p>
                 ) : (
                   <ActionForm action={addLocationAction} submitLabel="Add location" resetOnSuccess className="space-y-3">
-                    <Field label="New location">
-                      <input name="name" placeholder="e.g. Badaro" className={inputClass} required />
-                    </Field>
+                    <div className="grid grid-cols-2 gap-2">
+                      <Field label="New location">
+                        <input name="name" placeholder="e.g. Badaro Kitchen" className={inputClass} required />
+                      </Field>
+                      <Field label="Type">
+                        <select name="venueType" defaultValue="restaurant" className={inputClass}>
+                          {VENUE_TYPES.map((v) => (
+                            <option key={v.value} value={v.value}>
+                              {v.label}
+                            </option>
+                          ))}
+                        </select>
+                      </Field>
+                    </div>
                   </ActionForm>
                 )}
               </>
             ) : (
               <ul className="-mx-5 -my-4 divide-y divide-stone-100 text-sm">
                 {dash.locations.map((l) => (
-                  <li key={l.id} className="px-5 py-3 font-medium text-stone-800">
-                    {l.name}
+                  <li key={l.id} className="flex items-baseline justify-between gap-3 px-5 py-3">
+                    <span className="font-medium text-stone-800">{l.name}</span>
+                    <span className="text-xs text-stone-500">
+                      {VENUE_LABEL[l.venueType]} · day ends {CUTOFF_HOURS[l.dayCutoffHour]?.label ?? `${l.dayCutoffHour}:00`}
+                    </span>
                   </li>
                 ))}
               </ul>

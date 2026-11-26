@@ -20,10 +20,12 @@ export default async function DayPage({ params }: { params: Promise<{ id: string
   const d = await getDay(await getDb(), ctx.scope, id);
   if (!d) notFound();
 
-  const role = ctx.active.role;
   const open = d.day.status === "open";
-  const canOperate = open && (role === "owner" || role === "manager");
-  const canAdjust = !open && (role === "owner" || role === "accountant");
+  // Each part of the day follows the permission matrix (lib/permissions.ts).
+  const canSales = open && ctx.can("import_pos");
+  const canRecord = open && ctx.can("record_transactions");
+  const canClose = open && ctx.can("close_days");
+  const canAdjust = !open && ctx.can("post_corrections");
 
   return (
     <>
@@ -49,14 +51,14 @@ export default async function DayPage({ params }: { params: Promise<{ id: string
 
       <div className="grid items-start gap-6 lg:grid-cols-[minmax(0,1fr)_380px]">
         <div className="space-y-6">
-          <SalesCard d={d} canOperate={canOperate} />
-          <ExpensesCard d={d} canOperate={canOperate} />
-          <MovementsCard d={d} canOperate={canOperate} />
+          <SalesCard d={d} canOperate={canSales} />
+          <ExpensesCard d={d} canOperate={canRecord} />
+          <MovementsCard d={d} canOperate={canRecord} />
         </div>
         <div className="space-y-6 lg:sticky lg:top-20">
           {open && <DrawerCard d={d} />}
-          {open && <CountCard d={d} canOperate={canOperate} />}
-          {open && <CloseCard d={d} canOperate={canOperate} />}
+          {open && <CountCard d={d} canOperate={canClose} />}
+          {open && <CloseCard d={d} canOperate={canClose} />}
           {!open && <DrawerCard d={d} />}
         </div>
       </div>

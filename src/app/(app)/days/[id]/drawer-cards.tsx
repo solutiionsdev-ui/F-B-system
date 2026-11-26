@@ -194,7 +194,7 @@ export function CloseCard({ d, canOperate }: { d: DayData; canOperate: boolean }
   return (
     <Card step={4} title="Close the day" description="Closing freezes the figures and locks the day.">
       {!canOperate ? (
-        <p className="text-sm text-stone-500">Only owners and managers can close a day.</p>
+        <p className="text-sm text-stone-500">You don&apos;t have permission to close days.</p>
       ) : !d.countsComplete ? (
         <p className="text-sm text-stone-500">Save both the USD and LBP counts first.</p>
       ) : (

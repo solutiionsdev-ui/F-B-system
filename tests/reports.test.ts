@@ -42,8 +42,8 @@ afterAll(async () => {
 });
 
 describe("access", () => {
-  it("is for owners and accountants", async () => {
-    await expect(getPeriodReport(database.db, manager, week)).rejects.toThrow(UserError);
+  it("is open to every role, for the venues each person may see", async () => {
+    await expect(getPeriodReport(database.db, manager, week)).resolves.toBeTruthy();
     await expect(getPeriodReport(database.db, accountant, week)).resolves.toBeTruthy();
   });
 
@@ -113,7 +113,7 @@ describe("period report", () => {
   it("shows corrections separately from the frozen closing difference", async () => {
     const r0 = await getPeriodReport(database.db, owner, week);
     const flagged = r0.daily.find((d) => d.closing && !d.closing.withinTolerance)!;
-    await addAdjustment(database.db, accountant, {
+    await addAdjustment(database.db, owner, {
       dayId: flagged.dayId,
       currency: "LBP",
       amountMinor: 1_790_000n,

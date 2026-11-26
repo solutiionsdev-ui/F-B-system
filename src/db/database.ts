@@ -4,10 +4,11 @@
 import type { PGlite } from "@electric-sql/pglite";
 import { drizzle as drizzlePglite, type PgliteDatabase } from "drizzle-orm/pglite";
 import { drizzle as drizzlePostgres } from "drizzle-orm/postgres-js";
-import { sql } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import * as schema from "./schema";
 import { migrations } from "./migrations";
-import type { Role } from "./schema";
+import { memberships, type Role } from "./schema";
+import { resolvePermissions, type Permission } from "@/lib/permissions";
 
 export type DB = PgliteDatabase<typeof schema>;
 export type Tx = Parameters<Parameters<DB["transaction"]>[0]>[0];
@@ -99,19 +100,43 @@ export async function migrate(database: Database): Promise<string[]> {
   });
 }
 
-export type TenantScope = { orgId: string; userId: string; role: Role };
+/**
+ * Who is acting, in which business. `role` and `permissions` are what the app
+ * shows and checks first; withTenant() always re-reads the membership from the
+ * database and that is what the database enforces.
+ */
+export type TenantScope = { orgId: string; userId: string; role: Role; permissions?: Permission[] };
+
+/** A person's scope in a business, from their membership; null if they aren't a member. */
+export async function loadScope(db: DB, userId: string, orgId: string): Promise<TenantScope | null> {
+  const [m] = await db
+    .select({ role: memberships.role, permissions: memberships.permissions })
+    .from(memberships)
+    .where(and(eq(memberships.userId, userId), eq(memberships.orgId, orgId)));
+  if (!m) return null;
+  return { orgId, userId, role: m.role, permissions: resolvePermissions(m.role, m.permissions) };
+}
 
 /**
- * Runs `fn` in a transaction scoped to one restaurant group and one role.
- * Row-level security applies to everything inside, so a query that forgets
- * to filter by org still cannot see or change another group's data.
+ * Runs `fn` in a transaction scoped to one business and one person's access.
+ * The membership is read again here, so the database applies the person's
+ * current role, permissions and venues (row-level security), whatever the
+ * caller passed. A query that forgets a filter still can't see or change
+ * another business's or another venue's data.
  */
 export function withTenant<T>(db: DB, scope: TenantScope, fn: (tx: Tx) => Promise<T>): Promise<T> {
   return db.transaction(async (tx) => {
+    const [m] = await tx
+      .select({ role: memberships.role, permissions: memberships.permissions })
+      .from(memberships)
+      .where(and(eq(memberships.userId, scope.userId), eq(memberships.orgId, scope.orgId)));
+    if (!m) throw new Error("Not a member of this business.");
+    const permissions = resolvePermissions(m.role, m.permissions).join(",");
     await tx.execute(
       sql`select set_config('app.org_id', ${scope.orgId}, true),
                  set_config('app.user_id', ${scope.userId}, true),
-                 set_config('app.role', ${scope.role}, true)`,
+                 set_config('app.role', ${m.role}, true),
+                 set_config('app.permissions', ${permissions}, true)`,
     );
     await tx.execute(sql`set local role app_user`);
     return fn(tx);

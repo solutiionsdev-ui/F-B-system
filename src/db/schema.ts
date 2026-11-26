@@ -22,12 +22,14 @@ const ts = (name: string) => timestamp(name, { withTimezone: true, mode: "date" 
 
 export type Currency = "USD" | "LBP";
 export type Role = "owner" | "manager" | "accountant";
+export type VenueType = "restaurant" | "cafe" | "pub" | "other";
 
 export const organizations = pgTable("organizations", {
   id: uuid("id").primaryKey().defaultRandom(),
   name: text("name").notNull(),
   plan: text("plan").$type<"single" | "multi" | "enterprise">().notNull().default("single"),
   costDataVerified: boolean("cost_data_verified").notNull().default(false),
+  status: text("status").$type<"active" | "suspended" | "closed">().notNull().default("active"),
   /** Superseded by the per-currency allowances below; kept for history. */
   varianceToleranceCents: money("variance_tolerance_cents").notNull().default(100n),
   /** Approved rounding allowance per currency: decides Balanced vs Flagged, never skips the explanation. */
@@ -49,6 +51,18 @@ export const memberships = pgTable("memberships", {
   userId: uuid("user_id").notNull(),
   orgId: uuid("org_id").notNull(),
   role: text("role").$type<Role>().notNull(),
+  /** Per-person overrides of the role's default permissions (lib/permissions.ts). */
+  permissions: jsonb("permissions").$type<Record<string, boolean>>().notNull().default({}),
+  createdAt: ts("created_at").notNull().defaultNow(),
+});
+
+/** The venues a manager or accountant may see. Owners see every venue without rows here. */
+export const membershipLocations = pgTable("membership_locations", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  membershipId: uuid("membership_id").notNull(),
+  locationId: uuid("location_id").notNull(),
+  orgId: uuid("org_id").notNull(),
+  createdBy: uuid("created_by"),
   createdAt: ts("created_at").notNull().defaultNow(),
 });
 
@@ -65,6 +79,10 @@ export const locations = pgTable("locations", {
   orgId: uuid("org_id").notNull(),
   name: text("name").notNull(),
   timezone: text("timezone").notNull().default("Asia/Beirut"),
+  venueType: text("venue_type").$type<VenueType>().notNull().default("other"),
+  /** Sales before this hour (0-11) belong to the previous business day. */
+  dayCutoffHour: integer("day_cutoff_hour").notNull().default(5),
+  status: text("status").$type<"active" | "archived">().notNull().default("active"),
   createdAt: ts("created_at").notNull().defaultNow(),
 });
 
@@ -234,6 +252,9 @@ export const invitations = pgTable("invitations", {
   orgId: uuid("org_id").notNull(),
   email: text("email").notNull(),
   role: text("role").$type<Role>().notNull(),
+  /** Venues the person is assigned when they accept. */
+  locationIds: uuid("location_ids").array().notNull().default([]),
+  note: text("note"),
   tokenHash: text("token_hash").notNull(),
   expiresAt: ts("expires_at").notNull(),
   createdBy: uuid("created_by"),

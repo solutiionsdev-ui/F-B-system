@@ -1,11 +1,12 @@
-// The date-range and location bar shared by Reports, Cash Closing, Expenses
-// and Cash. A plain GET form, so every view is a shareable URL.
+// The date-range bar shared by Reports, Cash Closing, Expenses and Cash. A
+// plain GET form, so every period is a shareable URL. The branch comes from
+// the sidebar's switcher, shared by every screen (spec 2.2 and 4.2).
 import Link from "next/link";
 import type { ReportFilter } from "@/server/reports";
 import { shiftDate } from "@/server/reports";
 import { buttonClass, Field, inputClass } from "./ui";
 
-export type PeriodSearch = { from?: string; to?: string; location?: string };
+export type PeriodSearch = { from?: string; to?: string };
 
 export function periodPresets(today: string) {
   const monthStart = `${today.slice(0, 8)}01`;
@@ -18,20 +19,21 @@ export function periodPresets(today: string) {
   ];
 }
 
-/** The filter in the URL, or this month to today. Validated by whatever reads it. */
-export function readPeriod(sp: PeriodSearch, today: string): ReportFilter {
-  return { from: sp.from || `${today.slice(0, 8)}01`, to: sp.to || today, locationId: sp.location || null };
+/** The period in the URL (or this month to today) at the sidebar's branch. Validated by whatever reads it. */
+export function readPeriod(sp: PeriodSearch, today: string, branchId: string | null): ReportFilter {
+  return { from: sp.from || `${today.slice(0, 8)}01`, to: sp.to || today, locationId: branchId };
 }
 
 export function PeriodFilter({
   basePath,
   filter,
-  locations,
+  branchLabel,
   today,
 }: {
   basePath: string;
   filter: ReportFilter;
-  locations: { id: string; name: string }[];
+  /** The sidebar's branch, shown so the reader knows what the figures cover. */
+  branchLabel: string;
   today: string;
 }) {
   return (
@@ -45,23 +47,13 @@ export function PeriodFilter({
       <Field label="To">
         <input type="date" name="to" defaultValue={filter.to} className={inputClass} />
       </Field>
-      {locations.length > 1 && (
-        <Field label="Location">
-          <select name="location" defaultValue={filter.locationId ?? ""} className={inputClass}>
-            <option value="">All locations</option>
-            {locations.map((l) => (
-              <option key={l.id} value={l.id}>
-                {l.name}
-              </option>
-            ))}
-          </select>
-        </Field>
-      )}
       <button className={buttonClass("secondary")}>Show</button>
+      <span className="self-center text-[13px] text-stone-500">
+        Branch: <span className="font-medium text-stone-800">{branchLabel}</span>
+      </span>
       <div className="flex flex-wrap gap-0.5 rounded-lg bg-stone-100 p-1 text-[13px] sm:ml-auto">
         {periodPresets(today).map((p) => {
           const pq = new URLSearchParams({ from: p.from, to: p.to });
-          if (filter.locationId) pq.set("location", filter.locationId);
           const active = p.from === filter.from && p.to === filter.to;
           return (
             <Link

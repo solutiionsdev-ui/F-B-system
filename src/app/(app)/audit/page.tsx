@@ -65,7 +65,7 @@ function describe(table: string, op: string, oldData: Row | null, data: Row | nu
 
 export default async function AuditPage() {
   const ctx = await requireContext();
-  if (ctx.active.role === "manager") notFound();
+  if (!ctx.can("view_audit")) notFound();
   const rows = await getAuditTrail(await getDb(), ctx.scope, 200);
 
   return (

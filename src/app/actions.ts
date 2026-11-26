@@ -9,6 +9,7 @@ import type { Currency, PaidFrom, VarianceReason } from "@/db/schema";
 import type { ActionState } from "@/lib/action-state";
 import { PAYMENT_METHODS, type MovementKind } from "@/lib/expense-buckets";
 import { MoneyError, parseAmount, parseOptionalAmount, type Pair } from "@/lib/money";
+import { ALL_PERMISSIONS } from "@/lib/permissions";
 import { createSession, requireContext, setActiveOrg, signIn, signOut, type AppContext } from "@/server/auth";
 import { getDb } from "@/server/db";
 import {
@@ -30,10 +31,12 @@ import {
 import {
   acceptInvite,
   addLocation,
+  setLocationStatus,
+  setMemberAccess,
+  updateLocation,
   changeRole,
   createInvite,
   removeMember,
-  renameLocation,
   renewInvite,
   revokeInvite,
   updateSettings,
@@ -320,14 +323,45 @@ export async function addAdjustmentAction(_: ActionState, fd: FormData) {
 // ---------------------------------------------------------------- team
 
 export async function addLocationAction(_: ActionState, fd: FormData) {
-  return run((ctx, db) => addLocation(db, ctx.scope, str(fd, "name")), ["/settings", "/"], "Location added");
+  return run(
+    (ctx, db) => addLocation(db, ctx.scope, str(fd, "name"), str(fd, "venueType") || "other"),
+    ["/settings", "/team", "/"],
+    "Location added. Assign people to it in Team & Access.",
+  );
 }
 
-export async function renameLocationAction(_: ActionState, fd: FormData) {
+export async function updateLocationAction(_: ActionState, fd: FormData) {
   return run(
-    (ctx, db) => renameLocation(db, ctx.scope, str(fd, "locationId"), str(fd, "name")),
+    (ctx, db) =>
+      updateLocation(db, ctx.scope, str(fd, "locationId"), {
+        name: str(fd, "name"),
+        venueType: str(fd, "venueType"),
+        dayCutoffHour: Number(str(fd, "dayCutoffHour")),
+      }),
     ["/settings", "/"],
-    "Renamed",
+    "Location saved",
+  );
+}
+
+export async function setLocationStatusAction(_: ActionState, fd: FormData) {
+  const status = str(fd, "status") === "archived" ? "archived" : "active";
+  return run(
+    (ctx, db) => setLocationStatus(db, ctx.scope, str(fd, "locationId"), status),
+    ["/settings", "/team", "/"],
+    status === "archived" ? "Location archived" : "Location restored",
+  );
+}
+
+export async function setMemberAccessAction(_: ActionState, fd: FormData) {
+  return run(
+    (ctx, db) =>
+      setMemberAccess(db, ctx.scope, str(fd, "membershipId"), {
+        locationIds: fd.getAll("locationIds").map(String),
+        // Unticked boxes mean "off"; only the role's adjustable permissions are kept.
+        permissions: Object.fromEntries(ALL_PERMISSIONS.map((k) => [k, fd.has(`perm_${k}`)])),
+      }),
+    ["/team", "/"],
+    "Access saved",
   );
 }
 
@@ -350,7 +384,13 @@ async function inviteResult(
 
 export async function createInviteAction(_: ActionState, fd: FormData) {
   return inviteResult(
-    (ctx, db) => createInvite(db, ctx.scope, { email: str(fd, "email"), role: str(fd, "role") }),
+    (ctx, db) =>
+      createInvite(db, ctx.scope, {
+        email: str(fd, "email"),
+        role: str(fd, "role"),
+        locationIds: fd.getAll("locationIds").map(String),
+        note: str(fd, "note"),
+      }),
     "Invitation created",
   );
 }

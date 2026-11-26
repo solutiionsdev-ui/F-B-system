@@ -5,7 +5,7 @@ import { Sparkline } from "@/components/charts/sparkline";
 import { Icon } from "@/components/icons";
 import { Badge, buttonClass, Card, Delta, formatDate, formatTime, microClass, Money, REASON_LABELS, type Tone } from "@/components/ui";
 import { formatRate } from "@/lib/money";
-import { requireContext } from "@/server/auth";
+import { branchLabel, requireContext } from "@/server/auth";
 import { getDb } from "@/server/db";
 import { getToday, greeting, type AttentionItem, type Insight } from "@/server/today";
 import { QuickActions } from "./quick-actions";
@@ -91,12 +91,14 @@ function Insights({ items }: { items: Insight[] }) {
 }
 
 const RATE_SOURCE = { market: "Market", bank: "Bank", custom: "House rate" } as const;
+const VENUE_LABEL = { restaurant: "Restaurant", cafe: "Café", pub: "Pub", other: "Venue" } as const;
 
 export default async function TodayPage() {
   const ctx = await requireContext();
-  const data = await getToday(await getDb(), ctx.scope);
+  const data = await getToday(await getDb(), ctx.scope, undefined, ctx.branch?.id ?? null);
   const { dash, kpis } = data;
-  const canOperate = ctx.active.role !== "accountant";
+  const canOperate = ctx.can("close_days");
+  const canImport = ctx.can("import_pos");
   const firstName = ctx.user.name.replace(/\s*\(.*\)$/, "").split(/\s+/)[0];
   const needCount = data.needs.length;
 
@@ -108,20 +110,24 @@ export default async function TodayPage() {
             {greeting()}, {firstName}
           </h1>
           <p className="mt-1.5 text-sm text-stone-500">
-            {formatDate(data.today, { weekday: "long", day: "numeric", month: "long" })} ·{" "}
+            {formatDate(data.today, { weekday: "long", day: "numeric", month: "long" })} · {branchLabel(ctx)} ·{" "}
             {needCount === 0
               ? "nothing needs you right now"
               : `${needCount} thing${needCount === 1 ? " needs" : "s need"} you`}
           </p>
         </div>
-        {canOperate && (
+        {(canOperate || canImport) && (
           <div className="flex flex-wrap gap-2">
-            <Link href="/import" className={buttonClass("secondary")}>
-              <Icon name="import" size={16} /> Import POS file
-            </Link>
-            <Link href="/days/new" className={buttonClass("primary")}>
-              Open a day
-            </Link>
+            {canImport && (
+              <Link href="/import" className={buttonClass("secondary")}>
+                <Icon name="import" size={16} /> Import POS file
+              </Link>
+            )}
+            {canOperate && (
+              <Link href="/days/new" className={buttonClass("primary")}>
+                Open a day
+              </Link>
+            )}
           </div>
         )}
       </div>
@@ -132,7 +138,7 @@ export default async function TodayPage() {
           value={<Money minor={kpis.collected.value} currency="USD" />}
           chip={<Delta pct={kpis.collected.delta} label={kpis.compareLabel} />}
           chart={<Sparkline values={kpis.collected.spark} label="Collected per day, last 14 days" />}
-          sub={`All locations, in USD · ${kpis.compareLabel}`}
+          sub={`${branchLabel(ctx)}, in USD · ${kpis.compareLabel}`}
         />
         <StatTile
           label="Expenses today"
@@ -200,7 +206,10 @@ export default async function TodayPage() {
                     className="flex flex-col rounded-2xl border border-stone-200/80 bg-white p-4 shadow-[0_1px_2px_rgba(28,25,23,0.04)]"
                   >
                     <div className="flex flex-wrap items-start justify-between gap-x-3 gap-y-1">
-                      <h3 className="min-w-0 truncate font-semibold text-stone-900">{loc.name}</h3>
+                      <div className="min-w-0">
+                        <h3 className="truncate font-semibold text-stone-900">{loc.name}</h3>
+                        <div className="text-xs text-stone-500">{VENUE_LABEL[loc.venueType]}</div>
+                      </div>
                       {!day && <Badge>Not opened</Badge>}
                       {day?.status === "open" && <Badge tone="accent">Open</Badge>}
                       {day?.dayStatus === "closed_balanced" && <Badge tone="good">Balanced</Badge>}

@@ -2,7 +2,7 @@ import Link from "next/link";
 import { PeriodFilter, readPeriod, type PeriodSearch } from "@/components/period-filter";
 import { Badge, buttonClass, Card, formatDate, Kpi, Money, PageTitle, REASON_LABELS } from "@/components/ui";
 import { usdEquivalent, type Pair } from "@/lib/money";
-import { requireContext } from "@/server/auth";
+import { branchLabel, requireContext } from "@/server/auth";
 import { getDb } from "@/server/db";
 import { getEntryOptions } from "@/server/ledgers";
 import { getDashboard, getDay, todayIn, UserError } from "@/server/operations";
@@ -34,10 +34,10 @@ export default async function ClosingPage({ searchParams }: { searchParams: Prom
   const sp = await searchParams;
   const today = todayIn();
   const db = await getDb();
-  const role = ctx.active.role;
-  const canOperate = role === "owner" || role === "manager";
+  const canOperate = ctx.can("close_days");
+  const branchId = ctx.branch?.id ?? null;
 
-  const [dash, entry] = await Promise.all([getDashboard(db, ctx.scope, today), getEntryOptions(db, ctx.scope)]);
+  const [dash, entry] = await Promise.all([getDashboard(db, ctx.scope, today, branchId), getEntryOptions(db, ctx.scope, branchId)]);
   const openDays = (await Promise.all(entry.openDays.map((d) => getDay(db, ctx.scope, d.id)))).filter((d) => d != null);
   const openLocations = new Set(openDays.map((d) => d.day.locationId));
   const notOpened = dash.locations.filter((l) => !dash.todayByLocation[l.id] && !openLocations.has(l.id));
@@ -49,7 +49,7 @@ export default async function ClosingPage({ searchParams }: { searchParams: Prom
   let report: PeriodReport | null = null;
   let filterError: string | null = null;
   try {
-    report = await computePeriodReport(db, ctx.scope, readPeriod(sp, today));
+    report = await computePeriodReport(db, ctx.scope, readPeriod(sp, today, branchId));
   } catch (e) {
     if (!(e instanceof UserError)) throw e;
     filterError = e.message;
@@ -140,8 +140,8 @@ export default async function ClosingPage({ searchParams }: { searchParams: Prom
       <h2 className="mb-3 text-[15px] font-semibold tracking-tight text-stone-900">Closing history</h2>
       <PeriodFilter
         basePath="/closing"
-        filter={report?.filter ?? readPeriod({}, today)}
-        locations={dash.locations.map((l) => ({ id: l.id, name: l.name }))}
+        filter={report?.filter ?? readPeriod({}, today, branchId)}
+        branchLabel={branchLabel(ctx)}
         today={today}
       />
 

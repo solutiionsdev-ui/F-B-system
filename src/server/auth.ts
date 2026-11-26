@@ -3,13 +3,16 @@ import { cache } from "react";
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { and, asc, eq, gt } from "drizzle-orm";
-import { memberships, organizations, sessions, users, type Role } from "@/db/schema";
-import type { TenantScope } from "@/db/database";
+import { locations, memberships, organizations, sessions, users, type Role, type VenueType } from "@/db/schema";
+import { withTenant, type TenantScope } from "@/db/database";
+import { can, resolvePermissions, type Permission } from "@/lib/permissions";
 import { verifyPassword } from "@/lib/password";
 import { hashToken, newToken } from "@/lib/tokens";
 import { getDb } from "./db";
 
 const COOKIE = "fnb_session";
+/** The branch picked in the sidebar; empty for all branches. A view preference, checked on every request. */
+export const BRANCH_COOKIE = "fnb_branch";
 const SESSION_DAYS = 7;
 
 /**
@@ -24,13 +27,19 @@ export function isDemoMode() {
   return process.env.NODE_ENV !== "production";
 }
 
-export type Membership = { orgId: string; orgName: string; role: Role };
+export type Membership = { orgId: string; orgName: string; role: Role; permissions: Permission[] };
+export type Branch = { id: string; name: string; venueType: VenueType };
 export type AppContext = {
   sessionId: string;
   user: { id: string; name: string; email: string };
   memberships: Membership[];
   active: Membership;
   scope: TenantScope;
+  /** Active venues this person may see, for the branch switcher. */
+  branches: Branch[];
+  /** The branch picked in the sidebar, or null for all of them. */
+  branch: Branch | null;
+  can: (p: Permission) => boolean;
 };
 
 export async function signIn(email: string, password: string): Promise<boolean> {
@@ -102,20 +111,41 @@ export const getContext = cache(async (): Promise<AppContext | null> => {
     .innerJoin(users, eq(users.id, sessions.userId))
     .where(and(eq(sessions.id, hashToken(token)), gt(sessions.expiresAt, new Date())));
   if (!row) return null;
-  const ms = await db
-    .select({ orgId: memberships.orgId, orgName: organizations.name, role: memberships.role })
+  const rows = await db
+    .select({ orgId: memberships.orgId, orgName: organizations.name, role: memberships.role, overrides: memberships.permissions })
     .from(memberships)
     .innerJoin(organizations, eq(organizations.id, memberships.orgId))
     .where(eq(memberships.userId, row.user.id))
     .orderBy(asc(organizations.name));
-  if (ms.length === 0) return null;
+  if (rows.length === 0) return null;
+  const ms: Membership[] = rows.map((m) => ({
+    orgId: m.orgId,
+    orgName: m.orgName,
+    role: m.role,
+    permissions: resolvePermissions(m.role, m.overrides),
+  }));
   const active = ms.find((m) => m.orgId === row.session.activeOrgId) ?? ms[0];
+  const scope: TenantScope = { orgId: active.orgId, userId: row.user.id, role: active.role, permissions: active.permissions };
+  // Row-level security limits this to the venues the person may see.
+  const branches: Branch[] = await withTenant(db, scope, (tx) =>
+    tx
+      .select({ id: locations.id, name: locations.name, venueType: locations.venueType })
+      .from(locations)
+      .where(eq(locations.status, "active"))
+      .orderBy(asc(locations.name)),
+  );
+  const picked = (await cookies()).get(BRANCH_COOKIE)?.value;
+  // With a single venue, that venue is the branch; otherwise the sidebar choice if it's still allowed.
+  const branch = branches.length === 1 ? branches[0] : (branches.find((b) => b.id === picked) ?? null);
   return {
     sessionId: row.session.id,
     user: row.user,
     memberships: ms,
     active,
-    scope: { orgId: active.orgId, userId: row.user.id, role: active.role },
+    scope,
+    branches,
+    branch,
+    can: (p: Permission) => can(scope, p),
   };
 });
 
@@ -129,4 +159,10 @@ export async function setActiveOrg(ctx: AppContext, orgId: string) {
   if (!ctx.memberships.some((m) => m.orgId === orgId)) throw new Error("Not a member of that group");
   const db = await getDb();
   await db.update(sessions).set({ activeOrgId: orgId }).where(eq(sessions.id, ctx.sessionId));
+}
+
+/** What the current branch choice covers, for page headings. */
+export function branchLabel(ctx: AppContext) {
+  if (ctx.branch) return ctx.branch.name;
+  return ctx.branches.length === 0 ? "No venues assigned" : "All branches";
 }

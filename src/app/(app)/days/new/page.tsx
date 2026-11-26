@@ -27,7 +27,7 @@ export default async function NewDayPage({ searchParams }: { searchParams: Promi
           <ActionForm action={openDayAction} submitLabel="Open day" pendingLabel="Opening…">
             <div className="grid gap-4 sm:grid-cols-2">
               <Field label="Location">
-                <select name="locationId" defaultValue={location ?? data.locations[0]?.id} className={inputClass}>
+                <select name="locationId" defaultValue={location ?? ctx.branch?.id ?? data.locations[0]?.id} className={inputClass}>
                   {data.locations.map((l) => (
                     <option key={l.id} value={l.id}>
                       {l.name}

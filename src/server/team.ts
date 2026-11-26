@@ -1,8 +1,19 @@
 // Team management: members, invitations, locations and group settings.
 // Owners only. Framework-free like operations.ts.
-import { and, asc, count, eq, isNull, sql } from "drizzle-orm";
+import { and, asc, count, eq, inArray, isNull, sql } from "drizzle-orm";
 import { type DB, type TenantScope, withTenant } from "@/db/database";
-import { businessDays, invitations, locations, memberships, organizations, users, type Role } from "@/db/schema";
+import {
+  businessDays,
+  invitations,
+  locations,
+  membershipLocations,
+  memberships,
+  organizations,
+  users,
+  type Role,
+  type VenueType,
+} from "@/db/schema";
+import { cleanOverrides, resolvePermissions } from "@/lib/permissions";
 import { hashPassword, verifyPassword } from "@/lib/password";
 import { hashToken, newToken } from "@/lib/tokens";
 import { MoneyError, parseOptionalAmount } from "@/lib/money";
@@ -22,6 +33,30 @@ const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 function requireOwner(scope: TenantScope) {
   if (scope.role !== "owner") throw new UserError("Only owners can manage the team and locations.");
+}
+
+export const VENUE_TYPES: { value: VenueType; label: string }[] = [
+  { value: "restaurant", label: "Restaurant" },
+  { value: "cafe", label: "Café" },
+  { value: "pub", label: "Pub" },
+  { value: "other", label: "Other" },
+];
+
+function cleanVenueType(input: string): VenueType {
+  const t = VENUE_TYPES.find((v) => v.value === input);
+  if (!t) throw new UserError("Pick a venue type.");
+  return t.value;
+}
+
+/** Venue ids that really belong to this business (row-level security hides others). */
+async function cleanLocationIds(tx: Parameters<Parameters<typeof withTenant>[2]>[0], wanted: string[]) {
+  const unique = [...new Set(wanted.filter(Boolean))];
+  if (unique.length === 0) return [];
+  const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+  if (!unique.every((id) => UUID.test(id))) throw new UserError("Pick venues from the list.");
+  const found = await tx.select({ id: locations.id }).from(locations).where(inArray(locations.id, unique));
+  if (found.length !== unique.length) throw new UserError("Pick venues from the list.");
+  return unique;
 }
 
 function cleanEmail(input: string) {
@@ -57,18 +92,29 @@ export async function getTeam(db: DB, scope: TenantScope) {
         name: users.name,
         email: users.email,
         role: memberships.role,
+        overrides: memberships.permissions,
         joinedAt: memberships.createdAt,
       })
       .from(memberships)
       .innerJoin(users, eq(users.id, memberships.userId))
       .orderBy(asc(users.name));
+    const assigned = await tx.select().from(membershipLocations);
     const invites = await tx
       .select()
       .from(invitations)
       .where(pendingInvite)
       .orderBy(asc(invitations.createdAt));
     const locs = await tx
-      .select({ id: locations.id, name: locations.name, createdAt: locations.createdAt, days: count(businessDays.id) })
+      .select({
+        id: locations.id,
+        name: locations.name,
+        venueType: locations.venueType,
+        dayCutoffHour: locations.dayCutoffHour,
+        status: locations.status,
+        createdAt: locations.createdAt,
+        days: count(businessDays.id),
+        openDays: sql<number>`count(${businessDays.id}) filter (where ${businessDays.status} = 'open')`.mapWith(Number),
+      })
       .from(locations)
       .leftJoin(businessDays, eq(businessDays.locationId, locations.id))
       .groupBy(locations.id)
@@ -84,11 +130,20 @@ export async function getTeam(db: DB, scope: TenantScope) {
       },
       limits,
       usage: { locations: locs.length, users: members.length + invites.length },
-      members: members.map((m) => ({ ...m, isYou: m.userId === scope.userId })),
+      members: members.map((m) => ({
+        ...m,
+        isYou: m.userId === scope.userId,
+        /** Owners see every venue; everyone else only their assigned ones. */
+        allLocations: m.role === "owner",
+        locationIds: assigned.filter((a) => a.membershipId === m.membershipId).map((a) => a.locationId),
+        permissions: resolvePermissions(m.role, m.overrides),
+      })),
       invites: invites.map((i) => ({
         id: i.id,
         email: i.email,
         role: i.role,
+        locationIds: i.locationIds,
+        note: i.note,
         createdAt: i.createdAt,
         expiresAt: i.expiresAt,
         expired: i.expiresAt.getTime() < now,
@@ -100,9 +155,10 @@ export async function getTeam(db: DB, scope: TenantScope) {
 
 // ---------------------------------------------------------------- locations
 
-export async function addLocation(db: DB, scope: TenantScope, rawName: string) {
+export async function addLocation(db: DB, scope: TenantScope, rawName: string, rawType: string = "other") {
   requireOwner(scope);
   const name = cleanName(rawName, "location name");
+  const venueType = cleanVenueType(rawType);
   return withTenant(db, scope, async (tx) => {
     const [org] = await tx.select().from(organizations).where(eq(organizations.id, scope.orgId));
     const existing = await tx.select({ id: locations.id, name: locations.name }).from(locations);
@@ -115,7 +171,7 @@ export async function addLocation(db: DB, scope: TenantScope, rawName: string) {
     if (existing.some((l) => l.name.toLowerCase() === name.toLowerCase())) {
       throw new UserError(`There's already a location called ${name}.`);
     }
-    const [row] = await tx.insert(locations).values({ orgId: scope.orgId, name }).returning();
+    const [row] = await tx.insert(locations).values({ orgId: scope.orgId, name, venueType }).returning();
     return row;
   });
 }
@@ -133,13 +189,62 @@ export async function renameLocation(db: DB, scope: TenantScope, locationId: str
   });
 }
 
+/** Name, venue type and business-day cutoff hour (0-11: sales before it belong to the previous day). */
+export async function updateLocation(
+  db: DB,
+  scope: TenantScope,
+  locationId: string,
+  input: { name: string; venueType: string; dayCutoffHour: number },
+) {
+  requireOwner(scope);
+  const name = cleanName(input.name, "location name");
+  const venueType = cleanVenueType(input.venueType);
+  if (!Number.isInteger(input.dayCutoffHour) || input.dayCutoffHour < 0 || input.dayCutoffHour > 11) {
+    throw new UserError("The business day can end between midnight and 11:00.");
+  }
+  return withTenant(db, scope, async (tx) => {
+    const others = await tx.select({ id: locations.id, name: locations.name }).from(locations);
+    if (!others.some((l) => l.id === locationId)) throw new UserError("That location doesn't exist.");
+    if (others.some((l) => l.id !== locationId && l.name.toLowerCase() === name.toLowerCase())) {
+      throw new UserError(`There's already a location called ${name}.`);
+    }
+    await tx.update(locations).set({ name, venueType, dayCutoffHour: input.dayCutoffHour }).where(eq(locations.id, locationId));
+  });
+}
+
+/** Archiving hides a venue from day-to-day screens; its history stays in reports. */
+export async function setLocationStatus(db: DB, scope: TenantScope, locationId: string, status: "active" | "archived") {
+  requireOwner(scope);
+  if (status !== "active" && status !== "archived") throw new UserError("Pick active or archived.");
+  return withTenant(db, scope, async (tx) => {
+    const [loc] = await tx.select().from(locations).where(eq(locations.id, locationId));
+    if (!loc) throw new UserError("That location doesn't exist.");
+    if (status === "archived") {
+      const [{ n }] = await tx
+        .select({ n: count() })
+        .from(businessDays)
+        .where(and(eq(businessDays.locationId, locationId), eq(businessDays.status, "open")));
+      if (n > 0) throw new UserError(`${loc.name} still has ${n} open day${n === 1 ? "" : "s"}. Close ${n === 1 ? "it" : "them"} first.`);
+    }
+    await tx.update(locations).set({ status }).where(eq(locations.id, locationId));
+  });
+}
+
 // ---------------------------------------------------------------- invitations
 
-export async function createInvite(db: DB, scope: TenantScope, input: { email: string; role: string }) {
+export async function createInvite(
+  db: DB,
+  scope: TenantScope,
+  input: { email: string; role: string; locationIds?: string[]; note?: string },
+) {
   requireOwner(scope);
   const email = cleanEmail(input.email);
   const role = cleanRole(input.role);
+  const note = input.note?.trim().slice(0, 300) || null;
   return withTenant(db, scope, async (tx) => {
+    // Owners see every venue; managers and accountants only the ones chosen here.
+    const locationIds = role === "owner" ? [] : await cleanLocationIds(tx, input.locationIds ?? []);
+    if (role !== "owner" && locationIds.length === 0) throw new UserError("Pick at least one venue for this person.");
     const [org] = await tx.select().from(organizations).where(eq(organizations.id, scope.orgId));
     const [member] = await tx
       .select({ id: memberships.id })
@@ -165,6 +270,8 @@ export async function createInvite(db: DB, scope: TenantScope, input: { email: s
         orgId: scope.orgId,
         email,
         role,
+        locationIds,
+        note,
         tokenHash: hashToken(token),
         expiresAt: new Date(Date.now() + INVITE_DAYS * 86_400_000),
         createdBy: scope.userId,
@@ -210,7 +317,10 @@ export async function changeRole(db: DB, scope: TenantScope, membershipId: strin
     const [m] = await tx.select().from(memberships).where(eq(memberships.id, membershipId));
     if (!m) throw new UserError("That person isn't in this team.");
     if (m.userId === scope.userId) throw new UserError("You can't change your own role. Ask another owner.");
-    await tx.update(memberships).set({ role }).where(eq(memberships.id, membershipId));
+    await tx
+      .update(memberships)
+      .set({ role, permissions: cleanOverrides(role, m.permissions) })
+      .where(eq(memberships.id, membershipId));
   });
 }
 
@@ -221,6 +331,35 @@ export async function removeMember(db: DB, scope: TenantScope, membershipId: str
     if (!m) throw new UserError("That person isn't in this team.");
     if (m.userId === scope.userId) throw new UserError("You can't remove yourself. Ask another owner.");
     await tx.delete(memberships).where(eq(memberships.id, membershipId));
+  });
+}
+
+/**
+ * Which venues a manager or accountant may see, and which adjustable
+ * permissions they have on top of (or instead of) their role's defaults.
+ */
+export async function setMemberAccess(
+  db: DB,
+  scope: TenantScope,
+  membershipId: string,
+  input: { locationIds: string[]; permissions: Record<string, boolean> },
+) {
+  requireOwner(scope);
+  return withTenant(db, scope, async (tx) => {
+    const [m] = await tx.select().from(memberships).where(eq(memberships.id, membershipId));
+    if (!m) throw new UserError("That person isn't in this team.");
+    if (m.role === "owner") throw new UserError("Owners always see every venue and can do everything.");
+    const locationIds = await cleanLocationIds(tx, input.locationIds);
+    await tx.update(memberships).set({ permissions: cleanOverrides(m.role, input.permissions) }).where(eq(memberships.id, m.id));
+    const current = await tx.select().from(membershipLocations).where(eq(membershipLocations.membershipId, m.id));
+    const remove = current.filter((c) => !locationIds.includes(c.locationId)).map((c) => c.id);
+    const add = locationIds.filter((id) => !current.some((c) => c.locationId === id));
+    if (remove.length) await tx.delete(membershipLocations).where(inArray(membershipLocations.id, remove));
+    if (add.length) {
+      await tx
+        .insert(membershipLocations)
+        .values(add.map((locationId) => ({ membershipId: m.id, locationId, orgId: scope.orgId, createdBy: scope.userId })));
+    }
   });
 }
 
@@ -300,10 +439,23 @@ export async function acceptInvite(db: DB, token: string, input: { name?: string
     }
     // Attribute the audit entries to the person joining.
     await tx.execute(sql`select set_config('app.user_id', ${user.id}, true)`);
-    await tx
+    const [joined] = await tx
       .insert(memberships)
       .values({ userId: user.id, orgId: i.orgId, role: i.role })
-      .onConflictDoNothing({ target: [memberships.userId, memberships.orgId] });
+      .onConflictDoNothing({ target: [memberships.userId, memberships.orgId] })
+      .returning({ id: memberships.id });
+    if (joined && i.role !== "owner" && i.locationIds.length) {
+      // Only venues that still exist in this business.
+      const still = await tx
+        .select({ id: locations.id })
+        .from(locations)
+        .where(and(eq(locations.orgId, i.orgId), inArray(locations.id, i.locationIds)));
+      if (still.length) {
+        await tx
+          .insert(membershipLocations)
+          .values(still.map((l) => ({ membershipId: joined.id, locationId: l.id, orgId: i.orgId, createdBy: i.createdBy })));
+      }
+    }
     await tx.update(invitations).set({ acceptedAt: new Date(), acceptedBy: user.id }).where(eq(invitations.id, i.id));
     return { userId: user.id, orgId: i.orgId };
   });

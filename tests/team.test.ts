@@ -2,7 +2,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { and, eq } from "drizzle-orm";
 import { migrate, openPglite, withTenant, type Database, type TenantScope } from "@/db/database";
 import { DEMO_PASSWORD, seedDemo } from "@/db/seed";
-import { invitations, memberships, organizations, users } from "@/db/schema";
+import { invitations, locations, memberships, organizations, users } from "@/db/schema";
 import { hashToken } from "@/lib/tokens";
 import { UserError } from "@/server/operations";
 import {
@@ -23,6 +23,8 @@ let database: Database;
 let cafeOwner: TenantScope;
 let cafeManager: TenantScope;
 let bistroOwner: TenantScope;
+let cafeVenue: string;
+let bistroVenue: string;
 
 function pgCode(e: unknown): string | undefined {
   let cur = e as { code?: string; cause?: unknown } | undefined;
@@ -58,6 +60,8 @@ beforeAll(async () => {
   cafeOwner = await scopeFor("owner@demo.test", "Demo Café Group");
   cafeManager = await scopeFor("manager@demo.test", "Demo Café Group");
   bistroOwner = await scopeFor("bistro@demo.test", "Demo Bistro");
+  [cafeVenue] = (await database.db.select().from(locations).where(eq(locations.orgId, cafeOwner.orgId))).map((l) => l.id);
+  [bistroVenue] = (await database.db.select().from(locations).where(eq(locations.orgId, bistroOwner.orgId))).map((l) => l.id);
 });
 
 afterAll(async () => {
@@ -105,7 +109,7 @@ describe("locations", () => {
 
 describe("invitations", () => {
   it("lets a new person join with their own password", async () => {
-    const inv = await createInvite(database.db, cafeOwner, { email: "  Lara@Example.com ", role: "manager" });
+    const inv = await createInvite(database.db, cafeOwner, { email: "  Lara@Example.com ", role: "manager", locationIds: [cafeVenue] });
     expect(inv.email).toBe("lara@example.com");
     const [stored] = await database.db.select().from(invitations).where(eq(invitations.id, inv.id));
     expect(stored.tokenHash).toBe(hashToken(inv.token));
@@ -125,7 +129,7 @@ describe("invitations", () => {
   });
 
   it("asks an existing account for its password", async () => {
-    const inv = await createInvite(database.db, bistroOwner, { email: "manager@demo.test", role: "manager" });
+    const inv = await createInvite(database.db, bistroOwner, { email: "manager@demo.test", role: "manager", locationIds: [bistroVenue] });
     expect((await getInviteByToken(database.db, inv.token)).existingUser).toBe(true);
     await expect(acceptInvite(database.db, inv.token, { password: "wrong-password" })).rejects.toThrow(/isn't the password/);
     await acceptInvite(database.db, inv.token, { password: DEMO_PASSWORD });
@@ -134,18 +138,18 @@ describe("invitations", () => {
   });
 
   it("refuses duplicates and people already in the team", async () => {
-    await expect(createInvite(database.db, cafeOwner, { email: "manager@demo.test", role: "manager" })).rejects.toThrow(
+    await expect(createInvite(database.db, cafeOwner, { email: "manager@demo.test", role: "manager", locationIds: [cafeVenue] })).rejects.toThrow(
       /already in the team/,
     );
-    await createInvite(database.db, cafeOwner, { email: "sami@example.com", role: "accountant" });
-    await expect(createInvite(database.db, cafeOwner, { email: "sami@example.com", role: "manager" })).rejects.toThrow(
+    await createInvite(database.db, cafeOwner, { email: "sami@example.com", role: "accountant", locationIds: [cafeVenue] });
+    await expect(createInvite(database.db, cafeOwner, { email: "sami@example.com", role: "manager", locationIds: [cafeVenue] })).rejects.toThrow(
       /already has an invitation/,
     );
-    await expect(createInvite(database.db, cafeOwner, { email: "not-an-email", role: "manager" })).rejects.toThrow(UserError);
+    await expect(createInvite(database.db, cafeOwner, { email: "not-an-email", role: "manager", locationIds: [cafeVenue] })).rejects.toThrow(UserError);
   });
 
   it("can be renewed (old link dies) or revoked", async () => {
-    const inv = await createInvite(database.db, cafeOwner, { email: "rami@example.com", role: "manager" });
+    const inv = await createInvite(database.db, cafeOwner, { email: "rami@example.com", role: "manager", locationIds: [cafeVenue] });
     const renewed = await renewInvite(database.db, cafeOwner, inv.id);
     expect((await getInviteByToken(database.db, inv.token)).status).toBe("missing");
     expect((await getInviteByToken(database.db, renewed.token)).status).toBe("valid");
@@ -155,7 +159,7 @@ describe("invitations", () => {
   });
 
   it("expire after their deadline", async () => {
-    const inv = await createInvite(database.db, cafeOwner, { email: "old@example.com", role: "manager" });
+    const inv = await createInvite(database.db, cafeOwner, { email: "old@example.com", role: "manager", locationIds: [cafeVenue] });
     await database.db.update(invitations).set({ expiresAt: new Date(Date.now() - 1000) }).where(eq(invitations.id, inv.id));
     expect((await getInviteByToken(database.db, inv.token)).status).toBe("expired");
     await expect(acceptInvite(database.db, inv.token, { name: "Old", password: "long-enough-pw" })).rejects.toThrow(/expired/);
@@ -164,9 +168,9 @@ describe("invitations", () => {
 
   it("count against the plan's user allowance", async () => {
     // Bistro is on the Single plan (5 users): owner, accountant, manager + 2 invites fill it.
-    await createInvite(database.db, bistroOwner, { email: "a@example.com", role: "manager" });
-    await createInvite(database.db, bistroOwner, { email: "b@example.com", role: "manager" });
-    await expect(createInvite(database.db, bistroOwner, { email: "c@example.com", role: "manager" })).rejects.toThrow(
+    await createInvite(database.db, bistroOwner, { email: "a@example.com", role: "manager", locationIds: [bistroVenue] });
+    await createInvite(database.db, bistroOwner, { email: "b@example.com", role: "manager", locationIds: [bistroVenue] });
+    await expect(createInvite(database.db, bistroOwner, { email: "c@example.com", role: "manager", locationIds: [bistroVenue] })).rejects.toThrow(
       /includes 5 users/,
     );
   });

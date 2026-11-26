@@ -8,8 +8,20 @@
 // the same operations the app uses, on fixed November 2026 dates.
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { and, eq, inArray } from "drizzle-orm";
-import { migrate, openPglite, withTenant, type Database, type TenantScope } from "@/db/database";
-import { auditLog, cashCounts, exchangeRates, expenseCategories, expenses, locations, memberships, organizations, salesLines, users } from "@/db/schema";
+import { loadScope, migrate, openPglite, withTenant, type Database, type TenantScope } from "@/db/database";
+import {
+  auditLog,
+  cashCounts,
+  exchangeRates,
+  expenseCategories,
+  expenses,
+  locations,
+  membershipLocations,
+  memberships,
+  organizations,
+  salesLines,
+  users,
+} from "@/db/schema";
 import { toNotes } from "@/db/seed";
 import { reconcile } from "@/lib/closing";
 import { DEFAULT_CATEGORIES } from "@/lib/expense-buckets";
@@ -55,14 +67,13 @@ beforeAll(async () => {
       { email: "nadine@spec.test", name: "Nadine", passwordHash: "x" },
     ])
     .returning();
-  await db.insert(memberships).values([
+  const ms = await db.insert(memberships).values([
     { userId: rana.id, orgId: org.id, role: "owner" },
     { userId: karim.id, orgId: org.id, role: "manager" },
     { userId: nadine.id, orgId: org.id, role: "accountant" },
-  ]);
-  owner = { orgId: org.id, userId: rana.id, role: "owner" };
-  manager = { orgId: org.id, userId: karim.id, role: "manager" };
-  accountant = { orgId: org.id, userId: nadine.id, role: "accountant" };
+  ]).returning();
+  owner = (await loadScope(db, rana.id, org.id))!;
+  manager = (await loadScope(db, karim.id, org.id))!;
   const locs = await db
     .insert(locations)
     .values([
@@ -72,6 +83,13 @@ beforeAll(async () => {
     ])
     .returning();
   [venue.gemmayzeh, venue.hamra, venue.marMikhael] = locs.map((l) => l.id);
+  // Karim and Nadine work across all three venues here; tests/access.test.ts covers narrower access.
+  await db.insert(membershipLocations).values(
+    [ms[1], ms[2]].flatMap((m) => locs.map((l) => ({ membershipId: m.id, locationId: l.id, orgId: org.id }))),
+  );
+  // Nadine may post corrections (an owner granted it); by default an accountant can't.
+  await db.update(memberships).set({ permissions: { post_corrections: true } }).where(eq(memberships.id, ms[2].id));
+  accountant = (await loadScope(db, nadine.id, org.id))!;
   const cats = await db
     .insert(expenseCategories)
     .values(DEFAULT_CATEGORIES.map((name, i) => ({ orgId: org.id, name, position: i + 1 })))
@@ -204,12 +222,8 @@ describe("Golden financial test case (spec section 21)", () => {
 
 // ---------------------------------------------------------------- section 20
 
-describe("Test A: tenant and branch isolation", () => {
-  // Business-level isolation is covered in tests/db.test.ts and tests/hosted-postgres.test.ts.
-  it.todo("managers see only their assigned venues (Phase 2)");
-  it.todo("accountants see only the venues they were invited to (Phase 2)");
-  it.todo("a changed branch ID in a URL or form can't reach another venue (Phase 2)");
-});
+// Test A (tenant and branch isolation) lives in tests/access.test.ts, with
+// business-level isolation in tests/db.test.ts and tests/hosted-postgres.test.ts.
 
 describe("Test B: currency and historical rate", () => {
   it("gives each business day the rate in force on its own date", async () => {

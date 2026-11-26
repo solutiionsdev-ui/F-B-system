@@ -4,33 +4,32 @@ import { ActionForm } from "@/components/action-form";
 import { DayField, EntryGrid, ExpenseFields } from "@/components/entry-forms";
 import { PeriodFilter, readPeriod, type PeriodSearch } from "@/components/period-filter";
 import { Badge, buttonClass, Card, formatDate, Kpi, Money, PageTitle, PAID_FROM_LABELS } from "@/components/ui";
-import { requireContext } from "@/server/auth";
+import { branchLabel, requireContext } from "@/server/auth";
 import { getDb } from "@/server/db";
 import { getEntryOptions } from "@/server/ledgers";
-import { listLocations, todayIn, UserError } from "@/server/operations";
-import { computePeriodReport, REPORT_ROLES, type PeriodReport } from "@/server/reports";
+import { todayIn, UserError } from "@/server/operations";
+import { computePeriodReport, type PeriodReport } from "@/server/reports";
 
 export default async function ExpensesPage({ searchParams }: { searchParams: Promise<PeriodSearch> }) {
   const ctx = await requireContext();
   const sp = await searchParams;
   const today = todayIn();
   const db = await getDb();
-  const role = ctx.active.role;
-  const canOperate = role === "owner" || role === "manager";
+  const canOperate = ctx.can("record_transactions");
+  const branchId = ctx.branch?.id ?? null;
 
-  const entry = canOperate ? await getEntryOptions(db, ctx.scope) : null;
+  const entry = canOperate ? await getEntryOptions(db, ctx.scope, branchId) : null;
   let report: PeriodReport | null = null;
   let filterError: string | null = null;
   try {
-    report = await computePeriodReport(db, ctx.scope, readPeriod(sp, today));
+    report = await computePeriodReport(db, ctx.scope, readPeriod(sp, today, branchId));
   } catch (e) {
     if (!(e instanceof UserError)) throw e;
     filterError = e.message;
   }
-  const locations = report?.locations ?? (await listLocations(db, ctx.scope)).map((l) => ({ id: l.id, name: l.name }));
 
   const csv =
-    report && REPORT_ROLES.includes(role)
+    report && ctx.can("export_reports")
       ? `/reports/export?${new URLSearchParams({
           from: report.filter.from,
           to: report.filter.to,
@@ -53,7 +52,7 @@ export default async function ExpensesPage({ searchParams }: { searchParams: Pro
           )
         }
       />
-      <PeriodFilter basePath="/expenses" filter={report?.filter ?? readPeriod({}, today)} locations={locations} today={today} />
+      <PeriodFilter basePath="/expenses" filter={report?.filter ?? readPeriod({}, today, branchId)} branchLabel={branchLabel(ctx)} today={today} />
 
       {filterError || !report ? (
         <Card>

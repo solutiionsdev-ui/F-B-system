@@ -12,7 +12,6 @@ import {
   posProfiles,
   salesLines,
   users,
-  type Role,
 } from "@/db/schema";
 import { CURRENCIES, parseRate, usdEquivalent, zeroPair, type Currency, type Pair } from "@/lib/money";
 import { pickRateForDate } from "@/lib/rates";
@@ -30,12 +29,10 @@ import {
   type NormalizedLine,
   type Tender,
 } from "@/lib/pos-import";
-import { UserError } from "./operations";
-
-export const IMPORT_ROLES: Role[] = ["owner", "manager"];
+import { lockDay, requirePermission, UserError } from "./operations";
 
 function requireImporter(scope: TenantScope) {
-  if (!IMPORT_ROLES.includes(scope.role)) throw new UserError("Only owners and managers can import POS files.");
+  requirePermission(scope, "import_pos", "import POS files");
 }
 
 // ---------------------------------------------------------------- reading files
@@ -220,12 +217,21 @@ export async function createImportDraft(
   if (rows.length === 0) throw new UserError("The file has a header row but no data.");
   const fileHash = createHash("sha256").update(input.bytes).digest("hex");
   return withTenant(db, scope, async (tx) => {
-    const [loc] = await tx.select({ id: locations.id }).from(locations).where(eq(locations.id, input.locationId));
+    const [loc] = await tx
+      .select({ id: locations.id, name: locations.name, status: locations.status, dayCutoffHour: locations.dayCutoffHour })
+      .from(locations)
+      .where(eq(locations.id, input.locationId));
     if (!loc) throw new UserError("Pick a location.");
+    if (loc.status === "archived") throw new UserError(`${loc.name} is archived. Restore it in Settings to import for it.`);
     // Reuse a saved POS format whose columns all exist in this file.
     const profiles = await tx.select().from(posProfiles).orderBy(desc(posProfiles.updatedAt));
     const fits = profiles.find((p) => isMapping(p.mapping) && mappingColumns(p.mapping).every((c) => headers.includes(c)));
-    const mapping = completeMapping(fits ? (fits.mapping as Mapping) : suggestMapping(headers, rows), headers, rows);
+    // A saved POS format keeps its own cutoff; a new one starts from the venue's business-day cutoff.
+    const mapping = completeMapping(
+      fits ? (fits.mapping as Mapping) : { ...suggestMapping(headers, rows), dayCutoffHour: loc.dayCutoffHour },
+      headers,
+      rows,
+    );
     const [row] = await tx
       .insert(posImports)
       .values({
@@ -276,13 +282,14 @@ const importSummary = {
   createdByName: users.name,
 };
 
-export function listImports(db: DB, scope: TenantScope) {
+export function listImports(db: DB, scope: TenantScope, locationId: string | null = null) {
   return withTenant(db, scope, (tx) =>
     tx
       .select(importSummary)
       .from(posImports)
       .innerJoin(locations, eq(locations.id, posImports.locationId))
       .leftJoin(users, eq(users.id, posImports.createdBy))
+      .where(locationId ? eq(posImports.locationId, locationId) : undefined)
       .orderBy(desc(posImports.createdAt))
       .limit(50),
   );
@@ -419,6 +426,13 @@ export async function postImport(
         dayIds.set(d.date, day.id);
         daysCreated++;
       }
+    }
+    // Hold each existing day while posting, and make sure none was closed since the preview.
+    for (const d of preview.days) {
+      if (!d.dayId || !dayIds.has(d.date)) continue;
+      await lockDay(tx, d.dayId);
+      const [now] = await tx.select({ status: businessDays.status }).from(businessDays).where(eq(businessDays.id, d.dayId));
+      if (now?.status !== "open") throw new UserError(`${d.date} was closed while you were importing. Refresh and try again.`);
     }
     const lines = preview.postable.filter((l) => dayIds.has(l.businessDate));
     if (lines.length === 0) {

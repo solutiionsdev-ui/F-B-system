@@ -10,6 +10,7 @@ import { getComparison, getPeriodReport } from "@/server/reports";
 export async function GET(req: NextRequest) {
   const ctx = await getContext();
   if (!ctx) return new Response("Please sign in.", { status: 401 });
+  if (!ctx.can("export_reports")) return new Response("You don't have permission to download reports.", { status: 403 });
 
   const sp = req.nextUrl.searchParams;
   const format = sp.get("format");

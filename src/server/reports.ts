@@ -22,7 +22,6 @@ import {
   users,
   type Currency,
   type PaidFrom,
-  type Role,
   type VarianceReason,
 } from "@/db/schema";
 import { salesSummary } from "@/lib/closing";
@@ -30,9 +29,9 @@ import { dayStatusOf, type DayStatus } from "@/lib/day-status";
 import { MOVEMENT_KINDS, movementKindOf, type MovementKind } from "@/lib/expense-buckets";
 import { convert, parseRate, usdEquivalent, zeroPair, type Pair } from "@/lib/money";
 import { statusSummaryIn } from "./day-status";
-import { UserError } from "./operations";
+import { requirePermission, UserError } from "./operations";
 
-export const REPORT_ROLES: Role[] = ["owner", "accountant"];
+/** Seeing reports: every role by default, always limited to the person's venues by row-level security. */
 const MAX_DAYS = 366;
 
 export type ReportFilter = { from: string; to: string; locationId?: string | null };
@@ -171,7 +170,7 @@ export type ExpenseRow = {
 export type PeriodReport = Awaited<ReturnType<typeof computePeriodReport>>;
 
 export async function getPeriodReport(db: DB, scope: TenantScope, filter: ReportFilter) {
-  if (!REPORT_ROLES.includes(scope.role)) throw new UserError("Reports are available to owners and accountants.");
+  requirePermission(scope, "view_reports", "see reports");
   return computePeriodReport(db, scope, filter);
 }
 

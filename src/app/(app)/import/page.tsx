@@ -4,8 +4,7 @@ import { ActionForm } from "@/components/action-form";
 import { Badge, Card, Field, formatTime, inputClass, PageTitle } from "@/components/ui";
 import { requireContext } from "@/server/auth";
 import { getDb } from "@/server/db";
-import { listLocations } from "@/server/operations";
-import { IMPORT_ROLES, listImports, listProfiles } from "@/server/pos-import";
+import { listImports, listProfiles } from "@/server/pos-import";
 
 const STATUS_BADGE = {
   draft: <Badge tone="warn">Not posted</Badge>,
@@ -16,12 +15,10 @@ const STATUS_BADGE = {
 export default async function ImportPage() {
   const ctx = await requireContext();
   const db = await getDb();
-  const canImport = IMPORT_ROLES.includes(ctx.active.role);
-  const [imports, profiles, locs] = await Promise.all([
-    listImports(db, ctx.scope),
-    listProfiles(db, ctx.scope),
-    listLocations(db, ctx.scope),
-  ]);
+  const canImport = ctx.can("import_pos");
+  const [imports, profiles] = await Promise.all([listImports(db, ctx.scope, ctx.branch?.id ?? null), listProfiles(db, ctx.scope)]);
+  // The sidebar's branch first; only active venues can take new files.
+  const locs = ctx.branch ? [ctx.branch, ...ctx.branches.filter((b) => b.id !== ctx.branch!.id)] : ctx.branches;
 
   return (
     <>

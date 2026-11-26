@@ -6,7 +6,7 @@ import { Badge, Card, Field, formatDate, formatTime, inlineInputClass, inputClas
 import { formatRate, parseRate } from "@/lib/money";
 import { requireContext } from "@/server/auth";
 import { getDb } from "@/server/db";
-import { getImport, IMPORT_ROLES } from "@/server/pos-import";
+import { getImport } from "@/server/pos-import";
 import { MappingForm } from "./mapping-form";
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -28,7 +28,7 @@ export default async function ImportDetailPage({ params }: { params: Promise<{ i
   if (!data) notFound();
   const imp = data.import;
   const p = data.preview;
-  const canImport = IMPORT_ROLES.includes(ctx.active.role);
+  const canImport = ctx.can("import_pos");
 
   return (
     <>

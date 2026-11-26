@@ -1,6 +1,6 @@
 // Reads for the Expenses and Cash pages: what can be entered right now, and
-// the list of cash movements in a period. Framework-free, like operations.ts,
-// and open to every role (entering still needs owner or manager).
+// the list of cash movements in a period. Framework-free, like operations.ts.
+// Reading is open to every role; row-level security keeps it to the person's venues.
 import { and, asc, desc, eq, gte, lte } from "drizzle-orm";
 import { type DB, type TenantScope, withTenant } from "@/db/database";
 import { businessDays, cashMovements, exchangeRates, expenseCategories, locations, users, type Currency } from "@/db/schema";
@@ -12,13 +12,13 @@ export type OpenDayOption = { id: string; date: string; locationName: string };
 export type CategoryOption = { id: string; name: string };
 
 /** The open business days (expenses and movements are entered on one) and the categories offered. */
-export function getEntryOptions(db: DB, scope: TenantScope) {
+export function getEntryOptions(db: DB, scope: TenantScope, locationId: string | null = null) {
   return withTenant(db, scope, async (tx) => {
     const openDays: OpenDayOption[] = await tx
       .select({ id: businessDays.id, date: businessDays.businessDate, locationName: locations.name })
       .from(businessDays)
       .innerJoin(locations, eq(locations.id, businessDays.locationId))
-      .where(eq(businessDays.status, "open"))
+      .where(and(eq(businessDays.status, "open"), locationId ? eq(businessDays.locationId, locationId) : undefined))
       .orderBy(desc(businessDays.businessDate), asc(locations.name));
     const categories: CategoryOption[] = await tx
       .select({ id: expenseCategories.id, name: expenseCategories.name })

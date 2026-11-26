@@ -7,38 +7,36 @@ import { getNavCounts } from "@/server/operations";
 import { PLAN_LIMITS } from "@/server/team";
 import { Sidebar, type NavGroup } from "./sidebar";
 
+const VENUE_LABEL = { restaurant: "Restaurant", cafe: "Café", pub: "Pub", other: "Venue" } as const;
+
 export default async function AppLayout({ children }: { children: ReactNode }) {
   const ctx = await requireContext();
   const db = await getDb();
   const demo = isDemoMode();
-  const [demoUsers, counts] = await Promise.all([demo ? listDemoUsers() : Promise.resolve(null), getNavCounts(db, ctx.scope)]);
+  const [demoUsers, counts] = await Promise.all([
+    demo ? listDemoUsers() : Promise.resolve(null),
+    getNavCounts(db, ctx.scope, ctx.branch?.id ?? null),
+  ]);
   const role = ctx.active.role;
-  const ops = role === "owner" || role === "manager";
-  const books = role === "owner" || role === "accountant";
 
   const groups: NavGroup[] = [
     {
       label: "Operations",
       links: [
         { href: "/", label: "Dashboard", icon: "dashboard" },
-        { href: "/import", label: "POS Import", icon: "import", count: ops ? counts.importDrafts : 0 },
+        { href: "/import", label: "POS Import", icon: "import", count: ctx.can("import_pos") ? counts.importDrafts : 0 },
         { href: "/closing", label: "Cash Closing", icon: "closing", count: counts.openDays, attention: true, also: ["/days"] },
         { href: "/expenses", label: "Expenses", icon: "expenses" },
         { href: "/cash", label: "Cash", icon: "cash" },
       ],
     },
   ];
-  if (books) {
-    groups.push({
-      label: "Finance",
-      links: [
-        { href: "/reports", label: "Reports", icon: "reports" },
-        { href: "/audit", label: "Audit Trail", icon: "audit" },
-      ],
-    });
-  }
+  const finance: NavGroup["links"] = [];
+  if (ctx.can("view_reports")) finance.push({ href: "/reports", label: "Reports", icon: "reports" });
+  if (ctx.can("view_audit")) finance.push({ href: "/audit", label: "Audit Trail", icon: "audit" });
+  if (finance.length) groups.push({ label: "Finance", links: finance });
   const orgLinks: NavGroup["links"] = [];
-  if (role === "owner") orgLinks.push({ href: "/team", label: "Team & Access", icon: "team", count: counts.pendingInvites });
+  if (ctx.can("manage_team")) orgLinks.push({ href: "/team", label: "Team & Access", icon: "team", count: counts.pendingInvites });
   orgLinks.push({ href: "/settings", label: "Settings", icon: "settings", also: ["/rates"] });
   if (ctx.memberships.length > 1) orgLinks.push({ href: "/clients", label: "All clients", icon: "clients" });
   groups.push({ label: "Organisation", links: orgLinks });
@@ -54,6 +52,8 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
             subtitle: `${PLAN_LIMITS[counts.plan].label} plan · ${ROLE_LABEL[role]}`,
           }}
           orgs={ctx.memberships.map((m) => ({ id: m.orgId, label: m.orgName }))}
+          branches={ctx.branches.map((b) => ({ id: b.id, label: `${b.name} · ${VENUE_LABEL[b.venueType]}` }))}
+          branchId={ctx.branch?.id ?? null}
           user={{ id: ctx.user.id, name: ctx.user.name, role: ROLE_LABEL[role] }}
           demoUsers={demoUsers ? demoUsers.map((u) => ({ id: u.id, name: u.name })) : null}
         />

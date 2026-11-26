@@ -6,10 +6,10 @@ import { PeriodFilter, readPeriod, type PeriodSearch } from "@/components/period
 import { Card, formatDate, Kpi, Money, PageTitle } from "@/components/ui";
 import { MOVEMENT_KINDS, MOVEMENT_LABELS } from "@/lib/expense-buckets";
 import { formatAmount, zeroPair } from "@/lib/money";
-import { requireContext } from "@/server/auth";
+import { branchLabel, requireContext } from "@/server/auth";
 import { getDb } from "@/server/db";
 import { getEntryOptions, listMovements, type MovementRow } from "@/server/ledgers";
-import { listLocations, todayIn, UserError } from "@/server/operations";
+import { todayIn, UserError } from "@/server/operations";
 import { validateFilter } from "@/server/reports";
 
 export default async function CashPage({ searchParams }: { searchParams: Promise<PeriodSearch> }) {
@@ -17,14 +17,11 @@ export default async function CashPage({ searchParams }: { searchParams: Promise
   const sp = await searchParams;
   const today = todayIn();
   const db = await getDb();
-  const role = ctx.active.role;
-  const canOperate = role === "owner" || role === "manager";
+  const canOperate = ctx.can("record_transactions");
+  const branchId = ctx.branch?.id ?? null;
 
-  const [locations, entry] = await Promise.all([
-    listLocations(db, ctx.scope),
-    canOperate ? getEntryOptions(db, ctx.scope) : Promise.resolve(null),
-  ]);
-  let filter = readPeriod(sp, today);
+  const entry = canOperate ? await getEntryOptions(db, ctx.scope, branchId) : null;
+  let filter = readPeriod(sp, today, branchId);
   let rows: MovementRow[] | null = null;
   let filterError: string | null = null;
   try {
@@ -34,7 +31,7 @@ export default async function CashPage({ searchParams }: { searchParams: Promise
     if (!(e instanceof UserError)) throw e;
     filterError = e.message;
   }
-  const multi = locations.length > 1 && !filter.locationId;
+  const multi = ctx.branches.length > 1 && !filter.locationId;
 
   return (
     <>
@@ -42,7 +39,7 @@ export default async function CashPage({ searchParams }: { searchParams: Promise
         title="Cash"
         subtitle="Cash that changes place without being a cost: safe drops and bank deposits, partner withdrawals, cash added to the drawer. They change the cash in the drawer but never count as expenses or profit."
       />
-      <PeriodFilter basePath="/cash" filter={filter} locations={locations.map((l) => ({ id: l.id, name: l.name }))} today={today} />
+      <PeriodFilter basePath="/cash" filter={filter} branchLabel={branchLabel(ctx)} today={today} />
 
       {filterError || !rows ? (
         <Card>
