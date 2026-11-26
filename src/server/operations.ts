@@ -31,7 +31,7 @@ import { computeExpected, reconcile, salesSummary } from "@/lib/closing";
 import { dayStatusOf } from "@/lib/day-status";
 import { can, type Permission } from "@/lib/permissions";
 import { pickRateForDate } from "@/lib/rates";
-import { isMovementKind, movementDirection, type MovementKind } from "@/lib/expense-buckets";
+import { isMovementKind, MOVEMENT_KINDS, movementDirection, type MovementKind } from "@/lib/expense-buckets";
 import { CURRENCIES, countTotal, parseRate, rateToDb, RATE_SCALE, type Pair } from "@/lib/money";
 
 /** An error whose message is safe and useful to show to the person. */
@@ -94,6 +94,8 @@ export async function setRate(
   input: { lbpPerUsd: string; source: "market" | "bank" | "custom"; note?: string },
 ) {
   requirePermission(scope, "change_rate", "change the exchange rate");
+  // v2.1: every rate says where it came from; there is no silent default.
+  if (!["market", "bank", "custom"].includes(input.source)) throw new UserError("Choose where the rate comes from: market, bank or other.");
   const rate = parseRate(input.lbpPerUsd);
   if (rate < 1_000n * RATE_SCALE || rate > 1_000_000n * RATE_SCALE) {
     throw new UserError("That rate looks wrong. Enter LBP per 1 USD, for example 89,500.");
@@ -168,22 +170,12 @@ export async function openDay(
   });
 }
 
-/** Corrects the cash the drawer started with (e.g. a day opened by a POS import). */
-export async function setOpeningFloat(db: DB, scope: TenantScope, dayId: string, float: Pair) {
-  requirePermission(scope, "close_days", "change the opening float");
-  if (float.USD < 0n || float.LBP < 0n) throw new UserError("The opening float can't be negative.");
-  return withTenant(db, scope, async (tx) => {
-    const day = await loadOpenDay(tx, dayId);
-    await tx
-      .update(businessDays)
-      .set({ openingFloatUsd: float.USD, openingFloatLbp: float.LBP })
-      .where(eq(businessDays.id, day.id));
-  });
-}
-
 export type SalesTotalsInput = {
   cash: Pair;
   card: Pair;
+  /** Delivery apps: collected sales held by the app until it pays out. Never drawer cash. */
+  toters: Pair;
+  noknok: Pair;
   other: Pair;
   cashRefunds: Pair;
   discounts: Pair;
@@ -226,6 +218,8 @@ export async function saveManualSales(db: DB, scope: TenantScope, dayId: string,
     };
     add("payment", "cash", totals.cash);
     add("payment", "card", totals.card);
+    add("payment", "toters", totals.toters);
+    add("payment", "noknok", totals.noknok);
     add("payment", "other", totals.other);
     add("refund", "cash", totals.cashRefunds);
     add("discount", null, totals.discounts);
@@ -245,7 +239,7 @@ export async function addExpense(
   input: {
     dayId: string;
     categoryId: string;
-    /** Notes; optional. */
+    /** Notes: what it was for (supplier, purpose or payroll period). Required. */
     description?: string;
     vendor?: string;
     receiptRef?: string;
@@ -257,6 +251,8 @@ export async function addExpense(
   requirePermission(scope, "record_transactions", "record expenses");
   if (input.amountMinor <= 0n) throw new UserError("Enter an amount greater than zero.");
   if (!input.categoryId) throw new UserError("Pick a category for the expense.");
+  // Spec 9.3: every operating expense says what it was for.
+  if (!input.description?.trim()) throw new UserError("Add a note saying what the expense was for.");
   return withTenant(db, scope, async (tx) => {
     const day = await loadOpenDay(tx, input.dayId);
     const [cat] = await tx.select().from(expenseCategories).where(eq(expenseCategories.id, input.categoryId));
@@ -297,34 +293,79 @@ export async function voidExpense(db: DB, scope: TenantScope, expenseId: string,
   });
 }
 
+/**
+ * Records a cash movement (bucket B): it changes the cash expected in the
+ * drawer and is never an operating expense.
+ *  - Safe drop / bank deposit: cash out of the drawer.
+ *  - Partner withdrawal: cash out, with the partner's name.
+ *  - Opening float adjustment: adds to or reduces the float the day started
+ *    with; the original float is kept and a reason is required.
+ */
 export async function addMovement(
   db: DB,
   scope: TenantScope,
-  input: { dayId: string; kind: MovementKind; currency: Currency; amountMinor: bigint; reason?: string },
+  input: {
+    dayId: string;
+    kind: MovementKind;
+    currency: Currency;
+    amountMinor: bigint;
+    reason?: string;
+    partnerName?: string;
+    /** Float adjustments only: "in" adds to the float, "out" reduces it. */
+    direction?: "in" | "out";
+  },
 ) {
-  requirePermission(scope, "record_transactions", "record cash movements");
   if (!isMovementKind(input.kind)) throw new UserError("Pick what kind of cash movement this is.");
+  const type = MOVEMENT_KINDS.find((k) => k.kind === input.kind)!;
+  if (!type.offered) {
+    throw new UserError("Record this as a safe drop / bank deposit, a partner withdrawal or an opening float adjustment.");
+  }
+  const isFloat = input.kind === "float_adjustment";
+  if (isFloat) requirePermission(scope, "close_days", "adjust the opening float");
+  else requirePermission(scope, "record_transactions", "record cash movements");
   if (input.amountMinor <= 0n) throw new UserError("Enter an amount greater than zero.");
   const reason = input.reason?.trim() ?? "";
-  if (input.kind === "other" && !reason) throw new UserError("Say what the cash was taken out for.");
+  const partnerName = input.partnerName?.trim().replace(/\s+/g, " ").slice(0, 80) || null;
+  if (input.kind === "partner_withdrawal" && !partnerName) throw new UserError("Enter the partner's name for a partner withdrawal.");
+  if (isFloat && !reason) throw new UserError("Give a reason for adjusting the opening float.");
+  if (isFloat && input.direction !== "in" && input.direction !== "out") {
+    throw new UserError("Say whether the adjustment adds to the opening float or reduces it.");
+  }
+  const direction = movementDirection(input.kind) ?? input.direction!;
   return withTenant(db, scope, async (tx) => {
     const day = await loadOpenDay(tx, input.dayId);
+    if (isFloat && direction === "out") {
+      // The adjusted float can't go below zero.
+      const prior = await tx
+        .select()
+        .from(cashMovements)
+        .where(and(eq(cashMovements.businessDayId, day.id), eq(cashMovements.kind, "float_adjustment"), eq(cashMovements.currency, input.currency)));
+      const adjusted =
+        (input.currency === "USD" ? day.openingFloatUsd : day.openingFloatLbp) +
+        prior.reduce((sum, m) => sum + (m.direction === "in" ? m.amountMinor : -m.amountMinor), 0n);
+      if (input.amountMinor > adjusted) throw new UserError("That would take the opening float below zero.");
+    }
     await tx.insert(cashMovements).values({
       orgId: scope.orgId,
       businessDayId: day.id,
       kind: input.kind,
-      direction: movementDirection(input.kind),
+      direction,
       currency: input.currency,
       amountMinor: input.amountMinor,
       reason,
+      partnerName: input.kind === "partner_withdrawal" ? partnerName : null,
       createdBy: scope.userId,
     });
   });
 }
 
 export async function deleteMovement(db: DB, scope: TenantScope, movementId: string) {
-  requirePermission(scope, "record_transactions", "remove cash movements");
   return withTenant(db, scope, async (tx) => {
+    const [m] = await tx.select().from(cashMovements).where(eq(cashMovements.id, movementId));
+    if (!m) throw new UserError("That cash movement doesn't exist.");
+    if (m.kind === "float_adjustment") requirePermission(scope, "close_days", "remove opening float adjustments");
+    else requirePermission(scope, "record_transactions", "remove cash movements");
+    await loadOpenDay(tx, m.businessDayId);
     await tx.delete(cashMovements).where(eq(cashMovements.id, movementId));
   });
 }
@@ -601,25 +642,63 @@ export function getDashboard(db: DB, scope: TenantScope, today = todayIn(), loca
   });
 }
 
-export function getAuditTrail(db: DB, scope: TenantScope, limit = 100) {
+export type AuditFilter = {
+  limit?: number;
+  /** One person's changes. */
+  userId?: string | null;
+  /** One kind of record (a table name, e.g. "expenses"). */
+  table?: string | null;
+  /** Business-calendar dates in Beirut, inclusive. */
+  from?: string | null;
+  to?: string | null;
+};
+
+/**
+ * The append-only audit trail, newest first, with optional filters. Row-level
+ * security keeps it to the person's venues (team changes stay with owners).
+ */
+export async function getAuditTrail(db: DB, scope: TenantScope, filter: AuditFilter | number = {}) {
   requirePermission(scope, "view_audit", "see the audit trail");
-  return withTenant(db, scope, (tx) =>
-    tx
+  const f: AuditFilter = typeof filter === "number" ? { limit: filter } : filter;
+  const limit = Math.min(Math.max(f.limit ?? 200, 1), 500);
+  const iso = /^\d{4}-\d{2}-\d{2}$/;
+  return withTenant(db, scope, async (tx) => {
+    const where = and(
+      f.userId ? eq(auditLog.userId, f.userId) : undefined,
+      f.table ? eq(auditLog.tableName, f.table) : undefined,
+      f.from && iso.test(f.from) ? sql`(${auditLog.at} at time zone ${BEIRUT_TZ})::date >= ${f.from}::date` : undefined,
+      f.to && iso.test(f.to) ? sql`(${auditLog.at} at time zone ${BEIRUT_TZ})::date <= ${f.to}::date` : undefined,
+    );
+    const rows = await tx
       .select({
         id: auditLog.id,
         tableName: auditLog.tableName,
         op: auditLog.op,
         rowId: auditLog.rowId,
         at: auditLog.at,
+        userId: auditLog.userId,
         userName: users.name,
         newData: auditLog.newData,
         oldData: auditLog.oldData,
       })
       .from(auditLog)
       .leftJoin(users, eq(users.id, auditLog.userId))
+      .where(where)
       .orderBy(desc(auditLog.at), desc(auditLog.id))
-      .limit(limit),
-  );
+      .limit(limit);
+    // Who appears in the trail at all, for the person filter.
+    const people = await tx
+      .selectDistinct({ id: auditLog.userId, name: users.name })
+      .from(auditLog)
+      .innerJoin(users, eq(users.id, auditLog.userId));
+    const tables = await tx.selectDistinct({ table: auditLog.tableName }).from(auditLog);
+    return {
+      rows,
+      people: people.filter((p): p is { id: string; name: string } => Boolean(p.id)).sort((a, b) => a.name.localeCompare(b.name)),
+      tables: tables.map((t) => t.table).sort(),
+      limit,
+    };
+  });
 }
 
 /** Summary per client for an accountant (or anyone) with several groups. */

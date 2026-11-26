@@ -111,6 +111,8 @@ function sales(p: Partial<SalesTotalsInput>): SalesTotalsInput {
   return {
     cash: zero(),
     card: zero(),
+    toters: zero(),
+    noknok: zero(),
     other: zero(),
     cashRefunds: zero(),
     discounts: zero(),
@@ -158,11 +160,12 @@ describe("Golden financial test case (spec section 21)", () => {
       db,
       manager,
       day.id,
-      sales({ cash: { USD: 123000n, LBP: 895_000n }, card: { USD: 122000n, LBP: 0n }, other: { USD: 38000n, LBP: 0n } }),
+      // Delivery apps $380: Toters $230 and NokNok $150.
+      sales({ cash: { USD: 123000n, LBP: 895_000n }, card: { USD: 122000n, LBP: 0n }, toters: { USD: 23000n, LBP: 0n }, noknok: { USD: 15000n, LBP: 0n } }),
     );
     await addExpense(db, manager, { dayId, categoryId: salariesId, currency: "USD", amountMinor: 15000n, paidFrom: "drawer", description: "Shift wages" });
     await addMovement(db, manager, { dayId, kind: "safe_drop", currency: "USD", amountMinor: 20000n });
-    await addMovement(db, manager, { dayId, kind: "partner_withdrawal", currency: "USD", amountMinor: 10000n });
+    await addMovement(db, manager, { dayId, kind: "partner_withdrawal", currency: "USD", amountMinor: 10000n, partnerName: "Sami" });
 
     const d = (await getDay(db, manager, dayId))!;
     expect(d.rateScaled).toBe(R89500);
@@ -204,7 +207,7 @@ describe("Golden financial test case (spec section 21)", () => {
 
   it("leaves the original records unchanged and audits every step with its user", async () => {
     const db = database.db;
-    expect(await db.select().from(salesLines).where(eq(salesLines.businessDayId, dayId))).toHaveLength(4);
+    expect(await db.select().from(salesLines).where(eq(salesLines.businessDayId, dayId))).toHaveLength(5);
     const [exp] = await db.select().from(expenses).where(eq(expenses.businessDayId, dayId));
     expect(exp.amountMinor).toBe(15000n);
     expect(exp.status).toBe("active");
@@ -262,7 +265,17 @@ describe("Test B: currency and historical rate", () => {
 
 describe("Test C: POS import", () => {
   // CSV/XLSX upload, preview before posting, mapping and duplicate refusal are in tests/pos-import.test.ts.
-  it.todo("Toters and NokNok sales go to their clearing accounts, not the drawer (Phase 5)");
+  it("counts Toters and NokNok as collected sales, shown apart, never as drawer cash", async () => {
+    const db = database.db;
+    const day = await openDay(db, manager, { locationId: venue.marMikhael, businessDate: "2026-11-25", openingFloat: zero() });
+    await saveManualSales(db, manager, day.id, sales({ cash: { USD: 10000n, LBP: 0n }, toters: { USD: 22000n, LBP: 0n }, noknok: { USD: 15000n, LBP: 0n } }));
+    const d = (await getDay(db, manager, day.id))!;
+    expect(d.sales.byTender.toters.USD).toBe(22000n);
+    expect(d.sales.byTender.noknok.USD).toBe(15000n);
+    expect(d.sales.collected.USD).toBe(47000n);
+    expect(d.breakdown.expected.USD).toBe(10000n); // only the cash
+  });
+  it.todo("Toters and NokNok sales sit in clearing accounts until the app pays out to Bank/Whish (accounts phase)");
   it.todo("a receipt number reused on another business day is not treated as a duplicate (Phase 5)");
   it.todo("two payment lines on one receipt are both kept or flagged for review, never dropped (Phase 5)");
   it.todo("POS-reported totals are compared with calculated totals and mismatches shown (Phase 5)");
@@ -282,17 +295,55 @@ describe("Test D: expense classification", () => {
     expect(report.totals.expenses).toEqual({ USD: 50000n, LBP: 900_000n });
   });
 
-  it.todo("the eight universal hospitality categories are offered (Phase 3)");
-  it.todo("Bank and Whish are separate payment sources with a specific account (Phase 3)");
-  it.todo("notes are required and receipts can be attached (Phase 3)");
+  it("offers exactly the eight universal hospitality categories, and requires notes", async () => {
+    const db = database.db;
+    const day = await runDay(venue.hamra, "2026-11-25");
+    const d = (await getDay(db, manager, day.id))!;
+    expect(d.categories.map((c) => c.name)).toEqual([
+      "Salaries & Wages",
+      "Food & Kitchen Suppliers",
+      "Beverage, Coffee & Bar Suppliers",
+      "Generator & Electricity",
+      "Rent & Municipal Fees",
+      "Packaging & Delivery Supplies",
+      "Cleaning, Maintenance & Repairs",
+      "Miscellaneous / Petty Cash",
+    ]);
+    await expect(
+      addExpense(db, manager, { dayId: day.id, categoryId: d.categories[0].id, currency: "USD", amountMinor: 1000n, paidFrom: "drawer" }),
+    ).rejects.toThrow(/note/i);
+  });
+  it.todo("Bank and Whish are separate payment sources with a specific account (accounts phase)");
+  it.todo("receipts can be attached as files (accounts phase)");
 });
 
 describe("Test E: cash movement classification", () => {
   // Safe drops and partner withdrawals reducing the drawer without becoming expenses: see the golden case.
-  it.todo("a safe drop moves cash into the safe account; a deposit into the bank account (Phase 3)");
-  it.todo("a partner withdrawal records the partner's name and its source account (Phase 3)");
-  it.todo("an opening float adjustment changes the adjusted float exactly once (Phase 3)");
-  it.todo("both sides of a transfer post together or not at all (Phase 3)");
+  it("records the partner's name on a withdrawal and never counts movements as expenses", async () => {
+    const db = database.db;
+    const day = await runDay(venue.gemmayzeh, "2026-11-25");
+    await expect(addMovement(db, manager, { dayId: day.id, kind: "partner_withdrawal", currency: "USD", amountMinor: 5000n })).rejects.toThrow(
+      /partner/i,
+    );
+    await addMovement(db, manager, { dayId: day.id, kind: "partner_withdrawal", currency: "USD", amountMinor: 5000n, partnerName: "Georges" });
+    await addMovement(db, manager, { dayId: day.id, kind: "safe_drop", currency: "USD", amountMinor: 10000n });
+    const report = await getPeriodReport(db, owner, { from: "2026-11-25", to: "2026-11-25", locationId: venue.gemmayzeh });
+    expect(report.totals.expensesEq).toBe(0n);
+    expect(report.movements.map((m) => m.kind)).toEqual(["safe_drop", "partner_withdrawal"]);
+  });
+
+  it("applies an opening float adjustment to the adjusted float exactly once", async () => {
+    const db = database.db;
+    const [d0] = (await getPeriodReport(db, owner, { from: "2026-11-25", to: "2026-11-25", locationId: venue.gemmayzeh })).daily;
+    const before = (await getDay(db, manager, d0.dayId))!;
+    await addMovement(db, manager, { dayId: d0.dayId, kind: "float_adjustment", currency: "USD", amountMinor: 2500n, direction: "in", reason: "Float recounted" });
+    const after = (await getDay(db, manager, d0.dayId))!;
+    expect(after.breakdown.openingFloat).toEqual(before.breakdown.openingFloat);
+    expect(after.breakdown.adjustedFloat.USD).toBe(before.breakdown.openingFloat.USD + 2500n);
+    expect(after.breakdown.expected.USD).toBe(before.breakdown.expected.USD + 2500n);
+  });
+  it.todo("a safe drop moves cash into the safe account; a deposit into the bank account (accounts phase)");
+  it.todo("both sides of a transfer post together or not at all (accounts phase)");
 });
 
 describe("Test F: cash reconciliation", () => {

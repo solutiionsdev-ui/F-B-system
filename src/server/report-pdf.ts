@@ -145,7 +145,7 @@ export async function renderReportPdf(
     size: "A4",
     margins: { top: M, bottom: 50, left: M, right: M },
     bufferPages: true,
-    info: { Title: `${r.org.name} management report ${r.filter.from} to ${r.filter.to}`, Author: "Cash Control" },
+    info: { Title: `${r.org.name} management report ${r.filter.from} to ${r.filter.to}`, Author: "FINCTRL" },
   });
   const chunks: Buffer[] = [];
   doc.on("data", (c: Buffer) => chunks.push(c));
@@ -251,6 +251,8 @@ export async function renderReportPdf(
     [
       salesRow("Cash payments", s.byTender.cash, se.cash),
       salesRow("Card payments", s.byTender.card, se.card),
+      salesRow("Delivery apps: Toters", s.byTender.toters, se.toters),
+      salesRow("Delivery apps: NokNok", s.byTender.noknok, se.noknok),
       salesRow("Other payments", s.byTender.other, se.other),
       salesRow("Less refunds", { USD: -s.refunds.USD, LBP: -s.refunds.LBP }, -se.refunds),
       salesRow("Collected", s.collected, se.collected, true),

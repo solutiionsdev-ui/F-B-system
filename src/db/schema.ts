@@ -113,7 +113,7 @@ export const businessDays = pgTable("business_days", {
 });
 
 export type SalesLineType = "payment" | "refund" | "discount" | "void" | "tax" | "service_charge";
-export type Tender = "cash" | "card" | "other";
+export type Tender = "cash" | "card" | "toters" | "noknok" | "other";
 
 export const salesLines = pgTable("sales_lines", {
   id: uuid("id").primaryKey().defaultRandom(),
@@ -137,6 +137,8 @@ export const expenseCategories = pgTable("expense_categories", {
   name: text("name").notNull(),
   archived: boolean("archived").notNull().default(false),
   position: integer("position").notNull().default(100),
+  /** For an archived category folded into a universal one: where its expenses are reported. */
+  rollsUpTo: uuid("rolls_up_to"),
 });
 
 export type PaidFrom = "drawer" | "petty_cash" | "bank" | "owner";
@@ -173,8 +175,10 @@ export const cashMovements = pgTable("cash_movements", {
   kind: text("kind").$type<MovementKind>(),
   currency: text("currency").$type<Currency>().notNull(),
   amountMinor: money("amount_minor").notNull(),
-  /** Optional note; '' when none was given. */
+  /** Optional note; '' when none was given. Required for an opening float adjustment. */
   reason: text("reason").notNull(),
+  /** Who took the cash, for a partner withdrawal. */
+  partnerName: text("partner_name"),
   createdBy: uuid("created_by"),
   createdAt: ts("created_at").notNull().defaultNow(),
 });
@@ -268,6 +272,8 @@ export const posProfiles = pgTable("pos_profiles", {
   id: uuid("id").primaryKey().defaultRandom(),
   orgId: uuid("org_id").notNull(),
   name: text("name").notNull(),
+  /** A line under the name, e.g. that a mapping is a demo one. */
+  note: text("note"),
   mapping: jsonb("mapping").notNull(),
   createdBy: uuid("created_by"),
   createdAt: ts("created_at").notNull().defaultNow(),

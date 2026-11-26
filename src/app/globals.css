@@ -1,26 +1,34 @@
 @import "tailwindcss";
 
 /*
- * Calm, light canvas; colour is reserved for data and status.
- * brand = the warm orange accent (charts, highlights, selection).
- * Primary actions are near-black; green / red / blue mean status only.
+ * FINCTRL palette (spec 3.2): warm stone canvas, white cards, charcoal type
+ * and primary actions. Colour is reserved for status:
+ *   emerald = balanced / positive (also selection, focus and money-in charts),
+ *   amber   = attention and cash over,
+ *   red     = cash short and errors.
  */
 @theme inline {
   --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
 
-  --color-brand-50: #fff5ef;
-  --color-brand-100: #ffe6d8;
-  --color-brand-200: #fdc9ad;
-  --color-brand-300: #f7a37c;
-  --color-brand-500: #eb6834;
-  --color-brand-600: #d9541f;
-  --color-brand-700: #b5421a;
-  --color-brand-800: #8f3416;
+  --color-brand-50: #e8f5ec;
+  --color-brand-100: #d3ecdb;
+  --color-brand-200: #a9daba;
+  --color-brand-300: #74c392;
+  --color-brand-500: #1f9d5b;
+  --color-brand-600: #14804a;
+  --color-brand-700: #0f6a3c;
+  --color-brand-800: #0b5230;
 
-  --color-canvas: #f4f4f1;
-  --color-sidebar: #fafaf8;
-  --color-ink: #18181b;
+  --color-emerald-50: #e8f5ec;
+  --color-emerald-700: #14804a;
+  --color-amber-50: #fff5df;
+  --color-red-50: #fdecec;
+  --color-red-700: #c93838;
+
+  --color-canvas: #faf9f6;
+  --color-sidebar: #f5f4ef;
+  --color-ink: #202124;
 }
 
 html {
@@ -29,7 +37,7 @@ html {
 
 body {
   background: var(--color-canvas);
-  color: #1c1917;
+  color: #242629;
   font-family: var(--font-geist-sans), system-ui, sans-serif;
 }
 

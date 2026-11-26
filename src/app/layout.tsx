@@ -14,8 +14,8 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Cash Control",
-  description: "Daily cash, expenses and USD/LBP control for restaurants",
+  title: "FINCTRL",
+  description: "Hospitality financial control for restaurants, cafés and pubs in Lebanon",
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {

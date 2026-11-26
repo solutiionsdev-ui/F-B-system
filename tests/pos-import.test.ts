@@ -298,6 +298,8 @@ describe("importing", () => {
       saveManualSales(database.db, manager, day.id, {
         cash: { USD: 100n, LBP: 0n },
         card: { USD: 0n, LBP: 0n },
+        toters: { USD: 0n, LBP: 0n },
+        noknok: { USD: 0n, LBP: 0n },
         other: { USD: 0n, LBP: 0n },
         cashRefunds: { USD: 0n, LBP: 0n },
         discounts: { USD: 0n, LBP: 0n },

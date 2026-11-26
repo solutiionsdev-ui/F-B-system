@@ -68,7 +68,7 @@ const tones = {
   warn: "bg-amber-50 text-amber-700",
   bad: "bg-red-50 text-red-700",
   info: "bg-sky-50 text-sky-700",
-  accent: "bg-brand-50 text-brand-700",
+  accent: "bg-amber-50 text-amber-700",
 };
 export type Tone = keyof typeof tones;
 
@@ -112,7 +112,7 @@ export function Money({
   variance?: boolean;
   className?: string;
 }) {
-  const tone = variance ? (minor < 0n ? "text-red-700" : minor > 0n ? "text-sky-700" : "text-emerald-700") : "";
+  const tone = variance ? (minor < 0n ? "text-red-700" : minor > 0n ? "text-amber-700" : "text-emerald-700") : "";
   return <span className={`num whitespace-nowrap ${tone} ${className}`}>{formatAmount(minor, currency, { signed })}</span>;
 }
 
@@ -146,6 +146,19 @@ export function PageTitle({ title, subtitle, actions }: { title: ReactNode; subt
       <div className="min-w-0">
         <h1 className="text-[26px] font-semibold leading-tight tracking-tight text-stone-900 sm:text-[30px]">{title}</h1>
         {subtitle && <div className="mt-1.5 text-sm text-stone-500">{subtitle}</div>}
+      </div>
+      {actions}
+    </div>
+  );
+}
+
+/** A section heading inside a tab (the tab itself has the page's one big title). */
+export function SectionTitle({ title, subtitle, actions }: { title: ReactNode; subtitle?: ReactNode; actions?: ReactNode }) {
+  return (
+    <div className="mb-5 flex flex-wrap items-end justify-between gap-4">
+      <div className="min-w-0">
+        <h2 className="text-lg font-semibold tracking-tight text-stone-900">{title}</h2>
+        {subtitle && <div className="mt-1 text-sm text-stone-500">{subtitle}</div>}
       </div>
       {actions}
     </div>

@@ -86,6 +86,8 @@ async function simulateDay(db: DB, scope: TenantScope, locationId: string, categ
   await saveManualSales(db, scope, day.id, {
     cash: { USD: between(r, 550, 1150) * 100n, LBP: between(r, 14_000_000, 42_000_000, 5_000) },
     card: { USD: between(r, 280, 900) * 100n, LBP: between(r, 0, 4_500_000, 5_000) },
+    toters: { USD: 0n, LBP: 0n },
+    noknok: { USD: 0n, LBP: 0n },
     other: { USD: 0n, LBP: 0n },
     cashRefunds: { USD: r() < 0.3 ? between(r, 8, 25) * 100n : 0n, LBP: 0n },
     discounts: { USD: between(r, 15, 60) * 100n, LBP: 0n },
@@ -106,7 +108,7 @@ async function simulateDay(db: DB, scope: TenantScope, locationId: string, categ
   if (r() < 0.6) {
     await addExpense(db, scope, {
       dayId: day.id,
-      categoryId: cat("Beverage & Alcohol Suppliers"),
+      categoryId: cat("Beverage, Coffee & Bar Suppliers"),
       description: "Ice and water gallons",
       currency: "LBP",
       amountMinor: between(r, 300_000, 700_000, 50_000),
@@ -116,7 +118,7 @@ async function simulateDay(db: DB, scope: TenantScope, locationId: string, categ
   if (r() < 0.4) {
     await addExpense(db, scope, {
       dayId: day.id,
-      categoryId: cat("Cleaning"),
+      categoryId: cat("Cleaning, Maintenance & Repairs"),
       description: "Detergent and paper towels",
       currency: "USD",
       amountMinor: between(r, 9, 28) * 100n,

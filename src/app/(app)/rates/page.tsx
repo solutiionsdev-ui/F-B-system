@@ -1,6 +1,6 @@
 import { redirect } from "next/navigation";
 
-// The exchange rate now lives under Settings; old links and bookmarks land there.
+/** The rate is changed from the badge on Daily Close; the history is in Settings & Log (v2.1). */
 export default function RatesPage() {
-  redirect("/settings");
+  redirect("/settings/rates");
 }

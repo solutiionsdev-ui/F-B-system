@@ -1,17 +1,17 @@
 "use client";
 
-// One square per day, Monday-first weeks as columns. Grey = every day closed
-// that date was balanced. A date with a flagged day is coloured by the size of
+// One square per day, Monday-first weeks as columns. Soft emerald = every day
+// closed that date was balanced. A date with a flagged day is coloured by the size of
 // its difference (USD equivalent after corrections, for scale only) on a
-// diverging scale: red arm = short, blue arm = over. Open days are outlined in
-// the accent; days with no business day are dashed. Every square has its own
+// diverging scale: red arm = short, amber arm = over. Open days are outlined in
+// charcoal; days with no business day are dashed. Every square has its own
 // tooltip and is focusable, and the daily table below is the text version.
 import { useState } from "react";
 
-const SHORT = ["#ef8f89", "#d9453f", "#a82a27"];
-const OVER = ["#86b6ef", "#3987e5", "#1c5cab"];
-const BALANCED = "#dcd9d2";
-const ACCENT = "#eb6834";
+const SHORT = ["#f0a3a3", "#c93838", "#952626"];
+const OVER = ["#f3d08a", "#e0a53a", "#92400e"];
+const BALANCED = "#bfe3cc";
+const ACCENT = "#44403c";
 
 export type CalendarDay = { date: string; varianceAfterEq: number; closed: number; open: number; flagged: number };
 
@@ -41,7 +41,9 @@ function describe(d: CalendarDay) {
 /** Text inside a fill: white on the darker steps, ink on the lighter ones. */
 function inkOn(d: CalendarDay) {
   if (d.closed === 0) return "#57534e";
-  return bucket(d) >= 1 ? "#ffffff" : "#1c1917";
+  const b = bucket(d);
+  // The amber steps stay light longer than the red ones.
+  return b >= (d.varianceAfterEq <= 0 ? 1 : 2) ? "#ffffff" : "#1c1917";
 }
 
 function cellStyle(d: CalendarDay): React.CSSProperties {

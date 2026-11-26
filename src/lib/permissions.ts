@@ -58,10 +58,11 @@ export const PERMISSIONS: {
     accountant: { default: false, adjustable: false },
   },
   {
+    // v2.1: managers work in Daily Close and see Performance only when an owner allows it (read-only).
     key: "view_reports",
-    label: "See reports",
-    hint: "Reports for their own venues.",
-    manager: { default: true, adjustable: false },
+    label: "See Performance",
+    hint: "Totals, branch comparison and drawer differences for their own venues. Read-only.",
+    manager: { default: false, adjustable: true },
     accountant: { default: true, adjustable: false },
   },
   {

@@ -2,6 +2,7 @@ import "server-only";
 import { mkdirSync } from "node:fs";
 import path from "node:path";
 import { migrate, openPglite, openPostgres, type Database } from "@/db/database";
+import { ensureCedarDemo } from "@/db/demo-cedar";
 import { seedIfEmpty } from "@/db/seed";
 
 const g = globalThis as unknown as { __fnbDatabase?: Promise<Database> };
@@ -28,6 +29,12 @@ async function init(): Promise<Database> {
   if (applied.length) console.log(`[db] applied migrations: ${applied.join(", ")}`);
   if (process.env.SEED_DEMO !== "false" && (await seedIfEmpty(database))) {
     console.log("[db] seeded demo data (logins in README.md)");
+  }
+  // The Cedar Hospitality Group demo business is only ever added in demo mode
+  // (same rule as server/auth.ts), never to a database that holds real logins.
+  const demoMode = process.env.DEMO_MODE === "true" || (process.env.DEMO_MODE !== "false" && process.env.NODE_ENV !== "production");
+  if (demoMode && process.env.SEED_DEMO !== "false" && (await ensureCedarDemo(database))) {
+    console.log("[db] added the Cedar Hospitality Group demo business");
   }
   return database;
 }

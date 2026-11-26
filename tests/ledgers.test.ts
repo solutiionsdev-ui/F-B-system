@@ -64,7 +64,7 @@ describe("cash movement list", () => {
       kind: "partner_withdrawal",
       currency: "LBP",
       amountMinor: 1_794_000n,
-      reason: "Karim",
+      partnerName: "Karim",
     });
     const [hamra] = await database.db.select().from(locations).where(eq(locations.name, "Hamra"));
     const rows = await listMovements(database.db, manager, { ...month, locationId: hamra.id });
@@ -72,6 +72,8 @@ describe("cash movement list", () => {
     const w = rows.find((r) => r.kind === "partner_withdrawal")!;
     expect(w.dayOpen).toBe(true);
     expect(w.eq).toBe(2_000n); // 1,794,000 LBP at 89,700 = $20.00
+    expect(w.partnerName).toBe("Karim");
+    expect(w.rate).toBe(897_000_000n); // the rate locked on that business day, kept with the movement
     expect(w.enteredBy).toBe("Karim (Manager)");
   });
 

@@ -10,22 +10,35 @@
 //
 // Only drawer expenses and movements change the cash expected in the drawer.
 
-/** Operating-expense categories every new organisation starts with, in the order the picker shows them. */
-export const DEFAULT_CATEGORIES = [
+/**
+ * The eight universal hospitality categories from the FINCTRL spec (9.2), the
+ * same for restaurants, cafés and pubs, in the order the picker shows them.
+ * Every business uses this one list.
+ */
+export const UNIVERSAL_CATEGORIES = [
   "Salaries & Wages",
-  "Beverage & Alcohol Suppliers",
   "Food & Kitchen Suppliers",
+  "Beverage, Coffee & Bar Suppliers",
   "Generator & Electricity",
   "Rent & Municipal Fees",
-  "Cleaning",
-  "Maintenance & Repairs",
-  "Marketing",
-  "Miscellaneous",
+  "Packaging & Delivery Supplies",
+  "Cleaning, Maintenance & Repairs",
+  "Miscellaneous / Petty Cash",
 ] as const;
+
+/** What every new business starts with. */
+export const DEFAULT_CATEGORIES = UNIVERSAL_CATEGORIES;
 
 /** Extra words under a category name where the name alone could be read narrowly. */
 export const CATEGORY_HINTS: Record<string, string> = {
   "Salaries & Wages": "Monthly salaries and daily shift wages.",
+  "Food & Kitchen Suppliers": "Produce, meat, bakery, dairy, ingredients and kitchen supplies.",
+  "Beverage, Coffee & Bar Suppliers": "Coffee beans, tea, soft drinks, spirits, wine, beer and bar supplies.",
+  "Generator & Electricity": "EDL, generator subscription and generator fuel.",
+  "Rent & Municipal Fees": "Rent, municipality fees and other premises charges.",
+  "Packaging & Delivery Supplies": "Takeaway boxes, cups, bags, napkins and delivery packaging.",
+  "Cleaning, Maintenance & Repairs": "Cleaning, equipment maintenance and repairs.",
+  "Miscellaneous / Petty Cash": "Other documented operating costs and small petty-cash expenses.",
 };
 
 /** How an expense can be paid when it's entered. Older entries may also say petty cash or owner. */
@@ -38,34 +51,60 @@ export const PAID_FROM_LABELS: Record<string, string> = {
   owner: "Owner paid",
 };
 
-export type MovementKind = "safe_drop" | "partner_withdrawal" | "top_up" | "other";
+export type MovementKind = "safe_drop" | "partner_withdrawal" | "float_adjustment" | "top_up" | "other";
 
-export const MOVEMENT_KINDS: readonly { kind: MovementKind; label: string; direction: "in" | "out"; hint: string }[] = [
+/**
+ * Cash movements (bucket B). The spec's three types are offered for new
+ * entries. "Cash added" and "Other cash taken out" exist only on older
+ * entries: change brought in is now an opening float adjustment.
+ * A float adjustment has no fixed direction: it adds to or reduces the float.
+ */
+export const MOVEMENT_KINDS: readonly {
+  kind: MovementKind;
+  label: string;
+  direction: "in" | "out" | "either";
+  hint: string;
+  offered: boolean;
+}[] = [
   {
     kind: "safe_drop",
     label: "Safe drop / bank deposit",
     direction: "out",
     hint: "Cash moved from the drawer to the safe or the bank.",
+    offered: true,
   },
   {
     kind: "partner_withdrawal",
     label: "Partner withdrawal",
     direction: "out",
     hint: "A partner took cash out of the business.",
+    offered: true,
+  },
+  {
+    kind: "float_adjustment",
+    label: "Opening float adjustment",
+    direction: "either",
+    hint: "Corrects the cash the drawer started with. The original float is kept.",
+    offered: true,
   },
   {
     kind: "top_up",
     label: "Cash added to the drawer",
     direction: "in",
     hint: "Change brought in, or cash put back.",
+    offered: false,
   },
   {
     kind: "other",
     label: "Other cash taken out",
     direction: "out",
     hint: "Anything else that left the drawer and isn't an expense.",
+    offered: false,
   },
 ];
+
+/** The types offered when a movement is recorded. */
+export const OFFERED_MOVEMENT_KINDS = MOVEMENT_KINDS.filter((k) => k.offered);
 
 export const MOVEMENT_LABELS = Object.fromEntries(MOVEMENT_KINDS.map((k) => [k.kind, k.label])) as Record<MovementKind, string>;
 
@@ -73,8 +112,10 @@ export function isMovementKind(v: string): v is MovementKind {
   return MOVEMENT_KINDS.some((k) => k.kind === v);
 }
 
-export function movementDirection(kind: MovementKind): "in" | "out" {
-  return MOVEMENT_KINDS.find((k) => k.kind === kind)!.direction;
+/** The direction a type always has, or null when the entry decides (a float adjustment). */
+export function movementDirection(kind: MovementKind): "in" | "out" | null {
+  const d = MOVEMENT_KINDS.find((k) => k.kind === kind)!.direction;
+  return d === "either" ? null : d;
 }
 
 /**

@@ -70,11 +70,22 @@ export async function createSession(userId: string, activeOrgId?: string) {
   });
 }
 
-/** Everyone who can be picked in demo mode's "Viewing as" switcher. */
-export async function listDemoUsers() {
+/**
+ * Demo mode's "Viewing as" switcher: the people of the business on screen,
+ * owner first, so a demo moves between its owner, manager and accountant.
+ * Demonstration only; it is never offered outside demo mode.
+ */
+export async function listDemoUsers(orgId: string) {
   if (!isDemoMode()) return [];
   const db = await getDb();
-  return db.select({ id: users.id, name: users.name, email: users.email }).from(users).orderBy(asc(users.name));
+  const rows = await db
+    .select({ id: users.id, name: users.name, role: memberships.role })
+    .from(memberships)
+    .innerJoin(users, eq(users.id, memberships.userId))
+    .where(eq(memberships.orgId, orgId))
+    .orderBy(asc(users.name));
+  const order = { owner: 0, manager: 1, accountant: 2 } as const;
+  return rows.sort((a, b) => order[a.role] - order[b.role]);
 }
 
 /** The user demo mode signs in as by default: the first owner. */

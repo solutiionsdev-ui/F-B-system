@@ -13,6 +13,7 @@ import {
   salesLines,
   users,
 } from "@/db/schema";
+import { TENDERS } from "@/lib/closing";
 import { CURRENCIES, parseRate, usdEquivalent, zeroPair, type Currency, type Pair } from "@/lib/money";
 import { pickRateForDate } from "@/lib/rates";
 import {
@@ -73,15 +74,26 @@ type DayPreview = {
   rateNote: string | null;
   toImport: number;
   alreadyImported: number;
-  cash: Pair;
-  card: Pair;
-  other: Pair;
+  /** Sales already imported into this day from a different file: a sign the day may be imported twice. */
+  otherImportLines: number;
+  /** Payments by type. Only cash goes into a drawer. */
+  byTender: Record<Tender, Pair>;
   refunds: Pair;
-  memo: Pair; // discounts, voids, tax, service: shown, not collected
+  // Shown, never counted as collected (the payment amounts are already final).
+  discounts: Pair;
+  voids: Pair;
+  tax: Pair;
+  serviceCharge: Pair;
   collectedEq: bigint;
 };
 
-async function buildPreview(tx: Tx, imp: { locationId: string; headers: string[]; rows: string[][] }, mapping: Mapping) {
+const emptyTenders = (): Record<Tender, Pair> => ({ cash: zeroPair(), card: zeroPair(), toters: zeroPair(), noknok: zeroPair(), other: zeroPair() });
+
+async function buildPreview(
+  tx: Tx,
+  imp: { id?: string; locationId: string; headers: string[]; rows: string[][] },
+  mapping: Mapping,
+) {
   const n = normalizeRows(imp.headers, imp.rows, mapping);
   const dates = [...new Set(n.lines.map((l) => l.businessDate))].sort();
 
@@ -101,6 +113,17 @@ async function buildPreview(tx: Tx, imp: { locationId: string; headers: string[]
       .where(and(inArray(salesLines.businessDayId, days.map((d) => d.id)), eq(salesLines.source, "manual")))
       .groupBy(salesLines.businessDayId);
     for (const r of rows) manualDays.add(r.dayId);
+  }
+
+  // Imported sales already sitting on these days from other files.
+  const otherImports = new Map<string, number>();
+  if (days.length) {
+    const rows = await tx
+      .select({ dayId: salesLines.businessDayId, importId: salesLines.importId, n: count() })
+      .from(salesLines)
+      .where(and(inArray(salesLines.businessDayId, days.map((d) => d.id)), eq(salesLines.source, "pos_import")))
+      .groupBy(salesLines.businessDayId, salesLines.importId);
+    for (const r of rows) if (r.importId !== imp.id) otherImports.set(r.dayId, (otherImports.get(r.dayId) ?? 0) + r.n);
   }
 
   const existingRefs = new Set<string>();
@@ -152,11 +175,13 @@ async function buildPreview(tx: Tx, imp: { locationId: string; headers: string[]
       rateNote: r?.note ?? null,
       toImport: 0,
       alreadyImported: 0,
-      cash: zeroPair(),
-      card: zeroPair(),
-      other: zeroPair(),
+      otherImportLines: d ? (otherImports.get(d.id) ?? 0) : 0,
+      byTender: emptyTenders(),
       refunds: zeroPair(),
-      memo: zeroPair(),
+      discounts: zeroPair(),
+      voids: zeroPair(),
+      tax: zeroPair(),
+      serviceCharge: zeroPair(),
       collectedEq: 0n,
     });
   }
@@ -173,21 +198,58 @@ async function buildPreview(tx: Tx, imp: { locationId: string; headers: string[]
     }
     p.toImport++;
     postable.push(l);
-    if (l.lineType === "payment") p[l.tender ?? "other"][l.currency] += l.amountMinor;
+    if (l.lineType === "payment") p.byTender[l.tender ?? "other"][l.currency] += l.amountMinor;
     else if (l.lineType === "refund") p.refunds[l.currency] += l.amountMinor;
-    else p.memo[l.currency] += l.amountMinor;
+    else if (l.lineType === "discount") p.discounts[l.currency] += l.amountMinor;
+    else if (l.lineType === "void") p.voids[l.currency] += l.amountMinor;
+    else if (l.lineType === "tax") p.tax[l.currency] += l.amountMinor;
+    else p.serviceCharge[l.currency] += l.amountMinor;
   }
   for (const p of preview.values()) {
     if (!p.rate) continue;
     const collected: Pair = zeroPair();
-    for (const c of CURRENCIES) collected[c] = p.cash[c] + p.card[c] + p.other[c] - p.refunds[c];
+    for (const c of CURRENCIES) collected[c] = TENDERS.reduce((sum, t) => sum + p.byTender[t][c], 0n) - p.refunds[c];
     p.collectedEq = usdEquivalent(collected, parseRate(p.rate));
   }
+
+  // The whole file at a glance, in original currencies: what the confirmation step shows.
+  const totals = {
+    byTender: emptyTenders(),
+    refunds: zeroPair(),
+    discounts: zeroPair(),
+    voids: zeroPair(),
+    tax: zeroPair(),
+    serviceCharge: zeroPair(),
+    collectedEq: 0n,
+  };
+  for (const p of preview.values()) {
+    for (const t of TENDERS) for (const c of CURRENCIES) totals.byTender[t][c] += p.byTender[t][c];
+    for (const k of ["refunds", "discounts", "voids", "tax", "serviceCharge"] as const) {
+      for (const c of CURRENCIES) totals[k][c] += p[k][c];
+    }
+    totals.collectedEq += p.collectedEq;
+  }
+
+  // Source total against FINCTRL total, per currency: every payment row the
+  // file holds, against what will be posted. They differ only by rows already
+  // imported or blocked, which the counts explain. Rows that couldn't be read
+  // carry no amount and are listed as problems instead.
+  const collectedOf = (lines: NormalizedLine[]) => {
+    const pair = zeroPair();
+    for (const l of lines) {
+      if (l.lineType === "payment") pair[l.currency] += l.amountMinor;
+      else if (l.lineType === "refund") pair[l.currency] -= l.amountMinor;
+    }
+    return pair;
+  };
+  const check = { file: collectedOf(n.lines), posting: collectedOf(postable) };
 
   return {
     setup: n.setup,
     dateFormat: n.dateFormat,
     days: [...preview.values()],
+    totals,
+    check,
     postable,
     counts: {
       rows: imp.rows.length,
@@ -534,7 +596,6 @@ export async function deleteProfile(db: DB, scope: TenantScope, profileId: strin
 
 // ---------------------------------------------------------------- the mapping form
 
-const TENDERS: Tender[] = ["cash", "card", "other"];
 const TYPES: LineType[] = ["payment", "refund", "discount", "void", "tax", "service_charge"];
 const FORMATS: DateFormat[] = ["auto", "DMY", "MDY", "YMD"];
 
@@ -577,8 +638,8 @@ export function mappingFromForm(fd: FormData): Mapping {
     amount,
     tender:
       s("tenderMode") === "column"
-        ? { mode: "column", column: s("tenderColumn"), values: keep("tender", s("tenderColumn"), pairs<Tender>("tender", TENDERS)) }
-        : { mode: "fixed", value: (TENDERS as string[]).includes(s("tenderFixed")) ? (s("tenderFixed") as Tender) : "cash" },
+        ? { mode: "column", column: s("tenderColumn"), values: keep("tender", s("tenderColumn"), pairs<Tender>("tender", [...TENDERS])) }
+        : { mode: "fixed", value: (TENDERS as readonly string[]).includes(s("tenderFixed")) ? (s("tenderFixed") as Tender) : "cash" },
     type:
       s("typeMode") === "column"
         ? { mode: "column", column: s("typeColumn"), values: keep("type", s("typeColumn"), pairs<LineType>("type", TYPES)) }

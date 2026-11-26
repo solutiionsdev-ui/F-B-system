@@ -1,4 +1,4 @@
-// The one business-day status query. Today, Cash Closing, Reports and the
+// The one business-day status query. Today, Cash Close, Reports and the
 // exports all count days through here, so identical filters give identical
 // counts (spec 15 and acceptance test G).
 import { and, asc, eq, gte, lte } from "drizzle-orm";

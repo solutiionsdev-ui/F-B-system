@@ -5,7 +5,7 @@
 // the arrow keys to read both values for a day. Values are USD cents.
 import { useEffect, useRef, useState } from "react";
 
-const ACCENT = "#eb6834";
+const ACCENT = "#14804a";
 const COMPARE = "#898781";
 const GRID = "#ebe9e4";
 const AXIS = "#d6d3cc";

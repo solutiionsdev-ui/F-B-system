@@ -14,7 +14,7 @@ import {
 import { useToast } from "@/components/toast";
 import type { ActionState } from "@/lib/action-state";
 import type { QuickAction } from "@/server/today";
-import { LinkBox } from "./team/link-box";
+import { LinkBox } from "./settings/team/link-box";
 
 const base =
   "inline-flex items-center gap-1 whitespace-nowrap rounded-lg px-2.5 py-1 text-xs font-medium transition-colors disabled:opacity-50";

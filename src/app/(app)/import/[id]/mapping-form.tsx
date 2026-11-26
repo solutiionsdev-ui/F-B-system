@@ -9,6 +9,8 @@ import type { Mapping } from "@/lib/pos-import";
 const TENDER_OPTIONS = [
   ["cash", "Cash"],
   ["card", "Card"],
+  ["toters", "Delivery apps: Toters"],
+  ["noknok", "Delivery apps: NokNok"],
   ["other", "Other (wallet, transfer…)"],
   ["skip", "Don't import"],
 ] as const;
@@ -245,6 +247,8 @@ export function MappingForm({
           >
             <option value="cash">Cash</option>
             <option value="card">Card</option>
+            <option value="toters">Delivery apps: Toters</option>
+            <option value="noknok">Delivery apps: NokNok</option>
             <option value="other">Other</option>
           </select>
         </Radio>

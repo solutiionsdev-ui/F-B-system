@@ -3,7 +3,7 @@ import { Logo } from "@/components/ui";
 import { getContext, isDemoMode } from "@/server/auth";
 import { LoginForm } from "./login-form";
 
-export const metadata = { title: "Sign in · Cash Control" };
+export const metadata = { title: "Sign in · FINCTRL" };
 
 export default async function LoginPage() {
   if (isDemoMode()) redirect("/auth/demo");
@@ -15,7 +15,7 @@ export default async function LoginPage() {
           <div className="mb-4 flex justify-center">
             <Logo size={40} />
           </div>
-          <h1 className="text-xl font-semibold text-stone-900">Cash Control</h1>
+          <h1 className="text-xl font-semibold tracking-[0.04em] text-stone-900">FINCTRL</h1>
           <p className="mt-1 text-sm text-stone-500">Know where your money goes, every day.</p>
         </div>
         <div className="rounded-xl border border-stone-200 bg-white p-6 shadow-xs">

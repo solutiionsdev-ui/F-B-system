@@ -1,4 +1,4 @@
-# Cash Control: restaurant financial control (MVP core)
+# FINCTRL: hospitality financial control (MVP core)
 
 The daily financial control loop from the business plan: open the day,
 enter POS totals, record expenses, count the drawer in USD and LBP, then close

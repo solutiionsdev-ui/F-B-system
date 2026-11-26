@@ -42,9 +42,10 @@ afterAll(async () => {
 });
 
 describe("access", () => {
-  it("is open to every role, for the venues each person may see", async () => {
-    await expect(getPeriodReport(database.db, manager, week)).resolves.toBeTruthy();
+  it("is open to owners and accountants; managers only when an owner allows it (v2.1)", async () => {
+    await expect(getPeriodReport(database.db, manager, week)).rejects.toThrow(UserError);
     await expect(getPeriodReport(database.db, accountant, week)).resolves.toBeTruthy();
+    await expect(getPeriodReport(database.db, { ...manager, permissions: [...(manager.permissions ?? []), "view_reports"] }, week)).resolves.toBeTruthy();
   });
 
   it("only ever contains the signed-in group's data", async () => {

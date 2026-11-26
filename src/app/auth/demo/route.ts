@@ -1,7 +1,7 @@
 import type { NextRequest } from "next/server";
 import { redirect } from "next/navigation";
-import { eq } from "drizzle-orm";
-import { users } from "@/db/schema";
+import { and, eq } from "drizzle-orm";
+import { memberships, users } from "@/db/schema";
 import { createSession, defaultDemoUserId, isDemoMode, signOut } from "@/server/auth";
 import { getDb } from "@/server/db";
 
@@ -25,8 +25,20 @@ export async function GET(req: NextRequest) {
   userId ??= await defaultDemoUserId();
   if (!userId) return new Response("There are no users yet. Start with demo data (SEED_DEMO unset).", { status: 500 });
 
+  // Stay in the business on screen when switching between its people.
+  const org = sp.get("org");
+  let orgId: string | undefined;
+  if (org && UUID.test(org)) {
+    const db = await getDb();
+    const [m] = await db
+      .select({ orgId: memberships.orgId })
+      .from(memberships)
+      .where(and(eq(memberships.userId, userId), eq(memberships.orgId, org)));
+    orgId = m?.orgId;
+  }
+
   await signOut();
-  await createSession(userId);
+  await createSession(userId, orgId);
   const next = sp.get("next");
   redirect(next && next.startsWith("/") && !next.startsWith("//") && !next.startsWith("/\\") ? next : "/");
 }

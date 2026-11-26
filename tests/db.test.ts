@@ -25,7 +25,7 @@ import {
   getDashboard,
   getDay,
   saveCount,
-  setOpeningFloat,
+  addMovement,
   setRate,
   todayIn,
   UserError,
@@ -239,19 +239,22 @@ describe("closed days", () => {
     expect(day.adjustments).toHaveLength(1);
   });
 
-  it("let the opening float be corrected only while open", async () => {
+  it("let the opening float be adjusted only while open, never overwritten", async () => {
     const dash = await getDashboard(database.db, cafe);
     const open = dash.openDays[0];
-    await setOpeningFloat(database.db, cafe, open.id, { USD: 15000n, LBP: 3_000_000n });
+    const before = (await getDay(database.db, cafe, open.id))!;
+    const adjust = { kind: "float_adjustment" as const, currency: "USD" as const, amountMinor: 5000n, direction: "in" as const, reason: "Float recounted" };
+    await addMovement(database.db, cafe, { dayId: open.id, ...adjust });
     const d = (await getDay(database.db, cafe, open.id))!;
-    expect(d.breakdown.openingFloat).toEqual({ USD: 15000n, LBP: 3_000_000n });
-    await expect(setOpeningFloat(database.db, cafeAccountant, open.id, { USD: 0n, LBP: 0n })).rejects.toThrow(UserError);
+    expect(d.breakdown.openingFloat).toEqual(before.breakdown.openingFloat);
+    expect(d.breakdown.adjustedFloat.USD).toBe(before.breakdown.adjustedFloat.USD + 5000n);
+    await expect(addMovement(database.db, cafeAccountant, { dayId: open.id, ...adjust })).rejects.toThrow(UserError);
     const [closed] = await database.db
       .select()
       .from(businessDays)
       .where(and(eq(businessDays.orgId, cafe.orgId), eq(businessDays.status, "closed")))
       .limit(1);
-    await expect(setOpeningFloat(database.db, cafe, closed.id, { USD: 0n, LBP: 0n })).rejects.toThrow(/closed/);
+    await expect(addMovement(database.db, cafe, { dayId: closed.id, ...adjust })).rejects.toThrow(/closed/);
   });
 
   it("can't be closed without both counts, and need a reason when they don't balance", async () => {

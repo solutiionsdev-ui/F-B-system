@@ -6,7 +6,7 @@ import { ROLE_LABEL, ROLES } from "@/lib/roles";
 import { getDb } from "@/server/db";
 import { getInviteByToken } from "@/server/team";
 
-export const metadata = { title: "Join · Cash Control", robots: { index: false } };
+export const metadata = { title: "Join · FINCTRL", robots: { index: false } };
 
 const PROBLEMS = {
   missing: "This invitation link isn't valid. Check you copied the whole link.",
@@ -35,7 +35,7 @@ export default async function InvitePage({ params }: { params: Promise<{ token: 
               </p>
             </>
           ) : (
-            <h1 className="text-xl font-semibold text-stone-900">Cash Control</h1>
+            <h1 className="text-xl font-semibold tracking-[0.04em] text-stone-900">FINCTRL</h1>
           )}
         </div>
         <div className="rounded-xl border border-stone-200 bg-white p-6 shadow-xs">
@@ -44,7 +44,7 @@ export default async function InvitePage({ params }: { params: Promise<{ token: 
               <p className="text-stone-700">{PROBLEMS[invite.status]}</p>
               {invite.status === "used" && (
                 <Link href="/" className={buttonClass("primary")}>
-                  Go to Cash Control
+                  Go to FINCTRL
                 </Link>
               )}
             </div>

@@ -1,4 +1,4 @@
-// The date-range bar shared by Reports, Cash Closing, Expenses and Cash. A
+// The date-range bar shared by Reports, Cash Close and Expenses & Movements. A
 // plain GET form, so every period is a shareable URL. The branch comes from
 // the sidebar's switcher, shared by every screen (spec 2.2 and 4.2).
 import Link from "next/link";
@@ -29,9 +29,12 @@ export function PeriodFilter({
   filter,
   branchLabel,
   today,
+  extra = {},
 }: {
   basePath: string;
   filter: ReportFilter;
+  /** Other query values to keep when the period changes (a tab, for example). */
+  extra?: Record<string, string>;
   /** The sidebar's branch, shown so the reader knows what the figures cover. */
   branchLabel: string;
   today: string;
@@ -41,6 +44,9 @@ export function PeriodFilter({
       action={basePath}
       className="mb-6 flex flex-wrap items-end gap-3 rounded-2xl border border-stone-200/80 bg-white p-4 shadow-[0_1px_2px_rgba(28,25,23,0.04)]"
     >
+      {Object.entries(extra).map(([k, v]) => (
+        <input key={k} type="hidden" name={k} value={v} />
+      ))}
       <Field label="From">
         <input type="date" name="from" defaultValue={filter.from} className={inputClass} />
       </Field>
@@ -53,7 +59,7 @@ export function PeriodFilter({
       </span>
       <div className="flex flex-wrap gap-0.5 rounded-lg bg-stone-100 p-1 text-[13px] sm:ml-auto">
         {periodPresets(today).map((p) => {
-          const pq = new URLSearchParams({ from: p.from, to: p.to });
+          const pq = new URLSearchParams({ ...extra, from: p.from, to: p.to });
           const active = p.from === filter.from && p.to === filter.to;
           return (
             <Link

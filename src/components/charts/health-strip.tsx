@@ -1,15 +1,15 @@
-// The last 14 days of one location as a strip of thin bars: grey balanced,
-// red short, blue over, orange still open, a short pale stub when there was
+// The last 14 days of one location as a strip of thin bars: emerald balanced,
+// red short, amber over, charcoal still open, a short pale stub when there was
 // no business day. Each bar links to its day; the caption names the counts so
 // colour is never the only signal.
 import Link from "next/link";
 import type { HealthState, HealthTick } from "@/server/today";
 
 const COLOR: Record<HealthState, string> = {
-  balanced: "#a8a29e",
-  short: "#d9453f",
-  over: "#3987e5",
-  open: "#eb6834",
+  balanced: "#7fc39c",
+  short: "#c93838",
+  over: "#e0a53a",
+  open: "#44403c",
   none: "#e7e5e0",
 };
 const LABEL: Record<HealthState, string> = {

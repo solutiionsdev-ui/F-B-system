@@ -1,7 +1,7 @@
 // Tiny trend line for a stat tile: the history in a quiet grey, today in the
 // accent. Decorative support for the number beside it, so no axes.
 const LINE = "#b9b7b0";
-const ACCENT = "#eb6834";
+const ACCENT = "#14804a";
 
 export function Sparkline({
   values,

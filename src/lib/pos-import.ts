@@ -5,9 +5,10 @@
 // *mapping*: which column holds the date, the record ID, the amount, the
 // currency, the payment method and the line type, plus how each value in
 // those columns translates. A mapping saved under a name is a "POS format".
+import type { Tender } from "./closing";
 import { parseAmount, MoneyError, type Currency } from "./money";
 
-export type Tender = "cash" | "card" | "other";
+export type { Tender };
 export type LineType = "payment" | "refund" | "discount" | "void" | "tax" | "service_charge";
 export type DateFormat = "auto" | "DMY" | "MDY" | "YMD";
 
@@ -135,6 +136,9 @@ const find = (headers: string[], ...patterns: RegExp[]) => {
 
 export function suggestTender(value: string): Tender | "skip" {
   const v = value.toLowerCase();
+  // Delivery apps first: their sales are held by the app, never in the drawer.
+  if (/toters/.test(v)) return "toters";
+  if (/nok\s*nok/.test(v)) return "noknok";
   if (/cash|نقد|كاش/.test(v)) return "cash";
   if (/visa|master|card|credit|debit|amex|tpe|pos\b|بطاقة/.test(v)) return "card";
   if (v === "") return "skip";
@@ -451,3 +455,23 @@ export function isMapping(m: unknown): m is Mapping {
     !!x.type
   );
 }
+
+// ---------------------------------------------------------------- Omega (demo mapping)
+
+/**
+ * A saved format for the Omega "Daily Sales & Payment Export". This mapping is
+ * built from our own sample file, not from a real Omega export: Omega layouts
+ * differ by version and configuration (spec 8.1), so it is labelled as a demo
+ * mapping until it has been checked against a real file.
+ */
+export const OMEGA_FORMAT_NAME = "Omega POS — Daily Sales & Payment Export";
+export const OMEGA_FORMAT_NOTE = "Demo mapping v1.0 for .csv / .xlsx. Built from the sample file; confirm against a real Omega export.";
+export const OMEGA_DEMO_MAPPING: Mapping = {
+  dateColumn: "Date Time",
+  dateFormat: "DMY",
+  dayCutoffHour: 5,
+  idColumns: ["Receipt No", "Line"],
+  amount: { mode: "single", column: "Amount", currency: { mode: "column", column: "Currency", values: { USD: "USD", LBP: "LBP" } } },
+  tender: { mode: "column", column: "Payment Method", values: { Cash: "cash", Card: "card", Toters: "toters", NokNok: "noknok", "": "skip" } },
+  type: { mode: "column", column: "Line Type", values: { Sale: "payment", Refund: "refund", Discount: "discount", Void: "void", VAT: "tax" } },
+};

@@ -1,5 +1,5 @@
 // Business-day statuses (spec 6.3) and the counts every screen shows.
-// One definition, used by Today, Cash Closing, Reports and the exports, so the
+// One definition, used by Today, Cash Close, Reports and the exports, so the
 // same filter always gives the same numbers (spec 15, acceptance test G).
 //
 // A closed day's status is frozen at closing: Balanced when each currency's

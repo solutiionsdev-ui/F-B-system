@@ -8,7 +8,6 @@ import { withinAllowance } from "@/lib/closing";
 import { can } from "@/lib/permissions";
 import { formatAmount, parseRate, type Pair } from "@/lib/money";
 import type { IconName } from "@/components/icons";
-import { getStatusSummary } from "./day-status";
 import { getDashboard, todayIn } from "./operations";
 import { getImport } from "./pos-import";
 import { computePeriodReport, dailyTotals, shiftDate } from "./reports";
@@ -86,8 +85,10 @@ export async function getToday(db: DB, scope: TenantScope, today = todayIn(), lo
   const monthStart = `${today.slice(0, 8)}01`;
   const dash = await getDashboard(db, scope, today, locationId);
   const report = await computePeriodReport(db, scope, { from, to: today, locationId });
-  // Month to date, through the same status query Reports and Cash Closing use.
-  const status = await getStatusSummary(db, scope, { from: monthStart, to: today, locationId });
+  // This month to date: the very report the Reports page opens with, so the
+  // dashboard's closed, flagged and difference figures can't drift from it.
+  const month = await computePeriodReport(db, scope, { from: monthStart, to: today, locationId });
+  const status = month.cash.status;
   const days = dailyTotals(report);
   const byDate = new Map(days.map((d) => [d.date, d]));
   const canClose = can(scope, "close_days");
@@ -142,20 +143,17 @@ export async function getToday(db: DB, scope: TenantScope, today = todayIn(), lo
   const weekClosed = weekDays.filter((d) => d.dayStatus !== "open");
   // Flagged days still waiting for an explanation or correction: what "Needs you" lists.
   const weekFlagged = weekDays.filter((d) => d.dayStatus === "closed_flagged" && unresolved(d));
-  const weekDifference: Pair = { USD: 0n, LBP: 0n };
-  for (const d of weekClosed) {
-    weekDifference.USD += d.varianceAfter!.USD;
-    weekDifference.LBP += d.varianceAfter!.LBP;
-  }
   const kpis = {
     collected: { value: t.collectedEq, delta: pctChange(t.collectedEq, lastWeek.collectedEq), spark: days.map((d) => Number(d.collectedEq)) },
     expenses: { value: t.expensesEq, delta: pctChange(t.expensesEq, lastWeek.expensesEq), spark: days.map((d) => Number(d.expensesEq)) },
     difference: {
       /** After corrections, per currency: never combined into one number. */
-      value: weekDifference,
-      closed: weekClosed.length,
-      /** Same count as Reports for the same 7 days. */
-      flagged: weekDays.filter((d) => d.dayStatus === "closed_flagged").length,
+      /** Same period as Reports' default view (this month), and the same figures. */
+      from: monthStart,
+      to: today,
+      value: month.cash.varianceAfter,
+      closed: status.closed,
+      flagged: status.flagged,
     },
     compareLabel: `vs ${dayLabel(shiftDate(today, -7))}`,
   };
@@ -223,7 +221,8 @@ export async function getToday(db: DB, scope: TenantScope, today = todayIn(), lo
       });
     }
   }
-  if (!insights.some((i) => i.tone === "bad") && weekClosed.length >= 5 && kpis.difference.flagged === 0) {
+  const weekHasFlag = weekDays.some((d) => d.dayStatus === "closed_flagged");
+  if (!insights.some((i) => i.tone === "bad") && weekClosed.length >= 5 && !weekHasFlag) {
     insights.push({
       key: "balanced",
       tone: "good",
@@ -243,9 +242,9 @@ export async function getToday(db: DB, scope: TenantScope, today = todayIn(), lo
       pill: "Blocking",
       title: "Set today's exchange rate",
       detail: "Business days can't be opened until a rate is set.",
-      href: "/settings",
+      href: "/rates",
       icon: "rate",
-      actions: [{ kind: "link", label: "Set the rate", href: "/settings", primary: true }],
+      actions: [{ kind: "link", label: "Set the rate", href: "/rates", primary: true }],
       rank: 0,
     });
   }
@@ -276,7 +275,9 @@ export async function getToday(db: DB, scope: TenantScope, today = todayIn(), lo
         tone: "bad",
         pill: `${anyShort(v) ? "Short" : "Over"} ${pairText(v)}`,
         title: `${d.locationName} · ${dayLabel(d.date)} didn't balance`,
-        detail: `${d.closing!.reason ? REASONS[d.closing!.reason] : "No reason given"}. Post a correction on the day if it's explained.`,
+        detail: `${
+          d.closing!.reason && d.closing!.reason !== "other" ? REASONS[d.closing!.reason] : "Flagged for owner review"
+        }. Post a correction on the day if it's explained.`,
         href: `/days/${d.dayId}`,
         icon: "alert",
         actions: [{ kind: "link", label: "Review day", href: `/days/${d.dayId}` }],

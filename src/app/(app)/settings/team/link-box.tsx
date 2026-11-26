@@ -14,7 +14,7 @@ export function LinkBox({ path, email, orgName }: { path: string; email: string;
   );
   const [copied, setCopied] = useState(false);
   const url = `${origin}${path}`;
-  const message = `You're invited to join ${orgName} on Cash Control. Open this link to set up your account: ${url}`;
+  const message = `You're invited to join ${orgName} on FINCTRL. Open this link to set up your account: ${url}`;
 
   return (
     <div className="space-y-2 rounded-lg border border-emerald-200 bg-emerald-50 p-3 text-sm">

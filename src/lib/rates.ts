@@ -27,6 +27,16 @@ function zoneOffsetMs(at: Date, timeZone: string): number {
   return wall - Math.floor(at.getTime() / 1000) * 1000;
 }
 
+/** The instant of a wall-clock time ("09:30") on a date in a time zone. */
+export function zonedInstant(date: string, time: string, timeZone: string): Date {
+  const [y, m, d] = date.split("-").map(Number);
+  const [hh, mm] = time.split(":").map(Number);
+  const wall = Date.UTC(y, m - 1, d, hh, mm, 0, 0);
+  let instant = wall - zoneOffsetMs(new Date(wall), timeZone);
+  instant = wall - zoneOffsetMs(new Date(instant), timeZone);
+  return new Date(instant);
+}
+
 /** The last instant of a business date (23:59:59.999 local time) in a time zone. */
 export function endOfBusinessDate(date: string, timeZone: string): Date {
   const [y, m, d] = date.split("-").map(Number);

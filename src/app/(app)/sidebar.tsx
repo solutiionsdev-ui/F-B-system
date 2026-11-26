@@ -1,31 +1,43 @@
 "use client";
 
+// FINCTRL v2.1 navigation: exactly three primary tabs (Daily Close,
+// Performance, Settings & Log). Business and branch at the top left, the
+// person (and the demo role switcher) at the bottom left. On phones the three
+// tabs sit in a row under the top bar; the rest is in the slide-out menu.
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useState } from "react";
 import { logoutAction, switchOrgAction } from "@/app/actions";
+import { BranchSelect, type BranchOption } from "@/components/branch-select";
 import { Icon, type IconName } from "@/components/icons";
 import { Logo } from "@/components/ui";
 
-/** `also`: other path prefixes that count as this page (a day page belongs to Cash Closing). */
-export type NavLink = { href: string; label: string; icon: IconName; count?: number; attention?: boolean; also?: string[] };
-export type NavGroup = { label: string; links: NavLink[] };
+/** `also`: other path prefixes that belong to this tab (a day page belongs to Daily Close). */
+export type NavTab = {
+  href: string;
+  label: string;
+  /** A few words under the label. */
+  sub?: string;
+  icon: IconName;
+  count?: number;
+  attention?: boolean;
+  also?: string[];
+};
 
 type Props = {
-  groups: NavGroup[];
+  tabs: NavTab[];
   org: { id: string; name: string; subtitle: string };
   orgs: { id: string; label: string }[];
-  /** Venues this person may see; the branch picked applies to every screen. */
-  branches: { id: string; label: string }[];
+  /** Venues this person may see; the branch picked applies to every tab. */
+  branches: BranchOption[];
   branchId: string | null;
   user: { id: string; name: string; role: string };
   demoUsers: { id: string; name: string }[] | null;
 };
 
-function isActive(pathname: string, link: NavLink) {
+function isActive(pathname: string, tab: NavTab) {
   const under = (p: string) => pathname === p || pathname.startsWith(`${p}/`);
-  if (link.href === "/") return pathname === "/";
-  return under(link.href) || (link.also ?? []).some(under);
+  return under(tab.href) || (tab.also ?? []).some(under);
 }
 
 function initials(name: string) {
@@ -38,65 +50,36 @@ function initials(name: string) {
     .join("");
 }
 
-/** All branches or one, remembered for every screen. A GET form, so it works before scripts load. */
-function BranchSwitcher({ branches, branchId }: { branches: Props["branches"]; branchId: string | null }) {
-  if (branches.length === 0) {
-    return <p className="mt-2 px-1 text-xs text-amber-700">No venues assigned to you yet. Ask an owner.</p>;
-  }
-  if (branches.length === 1) {
-    return (
-      <div className="mt-2 flex items-center gap-2 rounded-lg px-1 text-[13px] text-stone-600">
-        <Icon name="door" size={14} className="text-stone-400" />
-        <span className="truncate">{branches[0].label}</span>
-      </div>
-    );
-  }
+function CountPill({ tab }: { tab: NavTab }) {
+  if (!tab.count) return null;
   return (
-    <form action="/branch" method="get" className="relative mt-2">
-      <input type="hidden" name="next" defaultValue="/" />
-      <label htmlFor="branch-switcher" className="mb-1 block px-1 font-mono text-[10.5px] font-medium uppercase tracking-[0.08em] text-stone-400">
-        Branch
-      </label>
-      <select
-        id="branch-switcher"
-        name="location"
-        defaultValue={branchId ?? ""}
-        onChange={(e) => {
-          const form = e.currentTarget.form!;
-          (form.elements.namedItem("next") as HTMLInputElement).value = window.location.pathname + window.location.search;
-          form.requestSubmit();
-        }}
-        className="w-full appearance-none rounded-lg border border-stone-200/80 bg-white py-1.5 pl-2.5 pr-8 text-[13px] text-stone-900 focus:outline-none focus:ring-4 focus:ring-brand-500/15"
-      >
-        <option value="">All branches consolidated</option>
-        {branches.map((b) => (
-          <option key={b.id} value={b.id}>
-            {b.label}
-          </option>
-        ))}
-      </select>
-      <span className="pointer-events-none absolute bottom-1.5 right-3 text-stone-400">⌄</span>
-      <noscript>
-        <button className="mt-1 text-xs text-stone-600 underline">Show</button>
-      </noscript>
-    </form>
+    <span
+      className={`num rounded-md px-1.5 text-[11px] font-semibold leading-5 ${
+        tab.attention ? "bg-amber-100 text-amber-800" : "bg-stone-200/70 text-stone-600"
+      }`}
+    >
+      {tab.count}
+    </span>
   );
 }
 
-function SidebarBody({ groups, org, orgs, branches, branchId, user, demoUsers, onNavigate }: Props & { onNavigate?: () => void }) {
+function SidebarBody({ tabs, org, orgs, branches, branchId, user, demoUsers, onNavigate }: Props & { onNavigate?: () => void }) {
   const pathname = usePathname();
   return (
     <div className="flex h-full flex-col">
       <div className="flex items-center gap-2.5 px-4 pb-4 pt-5">
         <Logo size={30} />
-        <span className="text-[15px] font-semibold tracking-tight text-stone-900">Cash Control</span>
+        <span className="leading-tight">
+          <span className="block text-[15px] font-semibold tracking-[0.04em] text-stone-900">FINCTRL</span>
+          <span className="block text-[11px] text-stone-500">Hospitality Financial Control</span>
+        </span>
       </div>
 
-      <div className="px-3">
+      <div className="space-y-2 px-3">
         {orgs.length > 1 ? (
           <form action={switchOrgAction} className="relative">
             <label htmlFor="org-switcher" className="sr-only">
-              Restaurant group
+              Business
             </label>
             <select
               id="org-switcher"
@@ -111,8 +94,13 @@ function SidebarBody({ groups, org, orgs, branches, branchId, user, demoUsers, o
                 </option>
               ))}
             </select>
-            <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-stone-400">⌄</span>
-            <p className="mt-1 px-1 text-xs text-stone-500">{org.subtitle}</p>
+            <span className="pointer-events-none absolute right-3 top-[18px] -translate-y-1/2 text-stone-400">⌄</span>
+            <div className="mt-1 flex items-center justify-between gap-2 px-1 text-xs text-stone-500">
+              <span className="truncate">{org.subtitle}</span>
+              <Link href="/clients" onClick={onNavigate} className="shrink-0 underline-offset-2 hover:text-stone-900 hover:underline">
+                All businesses
+              </Link>
+            </div>
           </form>
         ) : (
           <div className="rounded-xl border border-stone-200/80 bg-white px-3 py-2 shadow-[0_1px_2px_rgba(28,25,23,0.04)]">
@@ -120,46 +108,36 @@ function SidebarBody({ groups, org, orgs, branches, branchId, user, demoUsers, o
             <div className="text-xs text-stone-500">{org.subtitle}</div>
           </div>
         )}
-        <BranchSwitcher branches={branches} branchId={branchId} />
+        <BranchSelect branches={branches} branchId={branchId} />
       </div>
 
-      <nav className="mt-5 flex-1 space-y-5 overflow-y-auto px-3" aria-label="Main">
-        {groups.map((g) => (
-          <div key={g.label}>
-            <div className="px-3 pb-1.5 font-mono text-[10.5px] font-medium uppercase tracking-[0.08em] text-stone-400">{g.label}</div>
-            <ul className="space-y-0.5">
-              {g.links.map((l) => {
-                const active = isActive(pathname, l);
-                return (
-                  <li key={l.href}>
-                    <Link
-                      href={l.href}
-                      onClick={onNavigate}
-                      aria-current={active ? "page" : undefined}
-                      className={`flex items-center gap-2.5 rounded-lg px-3 py-2 text-[13.5px] transition-colors ${
-                        active
-                          ? "bg-white font-medium text-stone-900 shadow-[0_1px_2px_rgba(28,25,23,0.06)] ring-1 ring-stone-200/80"
-                          : "text-stone-600 hover:bg-stone-200/40 hover:text-stone-900"
-                      }`}
-                    >
-                      <Icon name={l.icon} className={active ? "text-stone-900" : "text-stone-400"} />
-                      <span className="flex-1 truncate">{l.label}</span>
-                      {l.count ? (
-                        <span
-                          className={`num rounded-md px-1.5 text-[11px] font-semibold leading-5 ${
-                            l.attention ? "bg-brand-100 text-brand-700" : "bg-stone-200/70 text-stone-600"
-                          }`}
-                        >
-                          {l.count}
-                        </span>
-                      ) : null}
-                    </Link>
-                  </li>
-                );
-              })}
-            </ul>
-          </div>
-        ))}
+      <nav className="mt-6 flex-1 overflow-y-auto px-3" aria-label="Main">
+        <ul className="space-y-1">
+          {tabs.map((t) => {
+            const active = isActive(pathname, t);
+            return (
+              <li key={t.href}>
+                <Link
+                  href={t.href}
+                  onClick={onNavigate}
+                  aria-current={active ? "page" : undefined}
+                  className={`flex items-center gap-3 rounded-xl px-3 py-2.5 transition-colors ${
+                    active
+                      ? "bg-white shadow-[0_1px_2px_rgba(28,25,23,0.06)] ring-1 ring-stone-200/80"
+                      : "hover:bg-stone-200/40"
+                  }`}
+                >
+                  <Icon name={t.icon} className={active ? "text-stone-900" : "text-stone-400"} />
+                  <span className="min-w-0 flex-1">
+                    <span className={`block truncate text-[14px] ${active ? "font-semibold text-stone-900" : "font-medium text-stone-700"}`}>{t.label}</span>
+                    {t.sub && <span className="block truncate text-[11.5px] text-stone-400">{t.sub}</span>}
+                  </span>
+                  <CountPill tab={t} />
+                </Link>
+              </li>
+            );
+          })}
+        </ul>
       </nav>
 
       <div className="border-t border-stone-200/80 p-3">
@@ -174,6 +152,7 @@ function SidebarBody({ groups, org, orgs, branches, branchId, user, demoUsers, o
         </div>
         {demoUsers ? (
           <form action="/auth/demo" method="get" className="mt-3">
+            <input type="hidden" name="org" value={org.id} />
             <label htmlFor="user-switcher" className="mb-1 flex items-center gap-1.5 px-1 text-[11px] font-medium text-stone-400">
               <span className="rounded bg-amber-100 px-1 text-[10px] font-semibold text-amber-800">DEMO</span>
               Viewing as
@@ -204,27 +183,49 @@ function SidebarBody({ groups, org, orgs, branches, branchId, user, demoUsers, o
   );
 }
 
-/** Desktop: a fixed sidebar. Phones: a top bar with a slide-out menu. */
+/** Desktop: a fixed sidebar. Phones and tablets: a top bar, the three tabs in a row, and a slide-out menu. */
 export function Sidebar(props: Props) {
   const [open, setOpen] = useState(false);
+  const pathname = usePathname();
   return (
     <>
       <aside className="sticky top-0 hidden h-screen w-[252px] shrink-0 border-r border-stone-200/80 bg-sidebar lg:block">
         <SidebarBody {...props} />
       </aside>
 
-      <div className="sticky top-0 z-30 flex items-center gap-3 border-b border-stone-200/80 bg-canvas/90 px-4 py-2.5 backdrop-blur lg:hidden">
-        <button
-          type="button"
-          onClick={() => setOpen(true)}
-          className="-ml-1 rounded-lg p-1.5 text-stone-700 hover:bg-stone-200/50"
-          aria-label="Open menu"
-          aria-expanded={open}
-        >
-          <Icon name="menu" size={20} />
-        </button>
-        <Logo size={26} />
-        <span className="min-w-0 truncate text-sm font-semibold text-stone-900">{props.org.name}</span>
+      <div className="sticky top-0 z-30 border-b border-stone-200/80 bg-canvas/95 backdrop-blur lg:hidden">
+        <div className="flex items-center gap-3 px-4 py-2.5">
+          <button
+            type="button"
+            onClick={() => setOpen(true)}
+            className="-ml-1 rounded-lg p-1.5 text-stone-700 hover:bg-stone-200/50"
+            aria-label="Open menu"
+            aria-expanded={open}
+          >
+            <Icon name="menu" size={20} />
+          </button>
+          <Logo size={26} />
+          <span className="min-w-0 flex-1 truncate text-sm font-semibold text-stone-900">{props.org.name}</span>
+        </div>
+        <nav aria-label="Tabs" className="grid px-2 pb-2" style={{ gridTemplateColumns: `repeat(${props.tabs.length}, minmax(0, 1fr))` }}>
+          {props.tabs.map((t) => {
+            const active = isActive(pathname, t);
+            return (
+              <Link
+                key={t.href}
+                href={t.href}
+                aria-current={active ? "page" : undefined}
+                className={`flex min-w-0 items-center justify-center gap-1.5 rounded-lg px-1.5 py-2 text-[13px] ${
+                  active ? "bg-white font-semibold text-stone-900 shadow-[0_1px_2px_rgba(28,25,23,0.08)] ring-1 ring-stone-200/80" : "text-stone-600"
+                }`}
+              >
+                <Icon name={t.icon} size={15} className={`hidden sm:block ${active ? "text-stone-900" : "text-stone-400"}`} />
+                <span className="truncate">{t.label}</span>
+                <CountPill tab={t} />
+              </Link>
+            );
+          })}
+        </nav>
       </div>
 
       {open && (

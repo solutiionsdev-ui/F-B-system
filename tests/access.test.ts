@@ -80,7 +80,17 @@ async function expectDenied(p: Promise<unknown>) {
 }
 
 const zero = zeroPair;
-const sales = { card: zero(), other: zero(), cashRefunds: zero(), discounts: zero(), voids: zero(), tax: zero(), serviceCharge: zero() };
+const sales = {
+  card: zero(),
+  toters: zero(),
+  noknok: zero(),
+  other: zero(),
+  cashRefunds: zero(),
+  discounts: zero(),
+  voids: zero(),
+  tax: zero(),
+  serviceCharge: zero(),
+};
 
 beforeAll(async () => {
   database = await openPglite();
@@ -151,7 +161,8 @@ describe("Test A: branch isolation", () => {
     const dash = await getDashboard(db, karim, "2026-11-20");
     expect(dash.locations.map((l) => l.name)).toEqual(["Hamra Roastery"]);
     expect(dash.openDays.map((d) => d.id)).toEqual([day.hamra]);
-    const report = await getPeriodReport(db, karim, { from: "2026-11-20", to: "2026-11-20" });
+    // The same read Daily Close and Performance use; row-level security limits it (managers don't open Performance by default).
+    const report = await computePeriodReport(db, karim, { from: "2026-11-20", to: "2026-11-20" });
     expect(report.locations.map((l) => l.name)).toEqual(["Hamra Roastery"]);
     expect(report.cash.status.records).toBe(1);
     expect(report.totals.salesEq.collected).toBe(10000n);
@@ -227,7 +238,7 @@ describe("Test A: branch isolation", () => {
 describe("permission matrix (screen 8)", () => {
   it("gives each role the spec's defaults", () => {
     expect(resolvePermissions("owner", {}).length).toBeGreaterThan(5);
-    expect(resolvePermissions("manager", {})).toEqual(["import_pos", "record_transactions", "close_days", "view_reports", "view_audit"]);
+    expect(resolvePermissions("manager", {})).toEqual(["import_pos", "record_transactions", "close_days", "view_audit"]);
     expect(resolvePermissions("accountant", {})).toEqual(["view_reports", "export_reports", "view_audit"]);
   });
 
@@ -289,11 +300,22 @@ describe("permission matrix (screen 8)", () => {
     await expect(closeDay(db, nadine, day.gemmayzeh, {})).rejects.toThrow(UserError);
   });
 
-  it("lets managers see reports for their venues, but not download them by default", async () => {
+  it("keeps Performance from managers unless an owner allows it, and never lets them download by default (v2.1)", async () => {
+    const db = database.db;
     const karim = await scope("karim");
-    expect(can(karim, "view_reports")).toBe(true);
+    expect(can(karim, "view_reports")).toBe(false);
     expect(can(karim, "export_reports")).toBe(false);
+    await expect(getPeriodReport(db, karim, { from: "2026-11-01", to: "2026-11-30" })).rejects.toThrow(UserError);
     expect(can(await scope("nadine"), "export_reports")).toBe(true);
+    // An owner can switch read-only Performance on for one manager.
+    const m = await membershipOf("karim");
+    await db.update(memberships).set({ permissions: { ...(m.permissions as object), view_reports: true } }).where(eq(memberships.id, m.id));
+    const granted = await scope("karim");
+    expect(can(granted, "view_reports")).toBe(true);
+    expect(can(granted, "export_reports")).toBe(false);
+    const report = await getPeriodReport(db, granted, { from: "2026-11-01", to: "2026-11-30" });
+    expect(report.byLocation.map((l) => l.locationId)).not.toContain(venue.gemmayzeh);
+    await db.update(memberships).set({ permissions: m.permissions }).where(eq(memberships.id, m.id));
   });
 
   it("keeps team management with owners", async () => {
@@ -302,7 +324,7 @@ describe("permission matrix (screen 8)", () => {
 
   it("limits the audit trail to each person's venues and keeps team changes with owners", async () => {
     const db = database.db;
-    const karimRows = await getAuditTrail(db, await scope("karim"), 500);
+    const karimRows = (await getAuditTrail(db, await scope("karim"), 500)).rows;
     expect(karimRows.length).toBeGreaterThan(0);
     for (const r of karimRows) {
       expect(["memberships", "membership_locations", "invitations", "exchange_rates", "organizations"]).not.toContain(r.tableName);
@@ -311,12 +333,12 @@ describe("permission matrix (screen 8)", () => {
     expect(karimDays).toContain(day.hamra);
     expect(karimDays).not.toContain(day.gemmayzeh);
 
-    const nadineRows = await getAuditTrail(db, await scope("nadine"), 500);
+    const nadineRows = (await getAuditTrail(db, await scope("nadine"), 500)).rows;
     expect(nadineRows.some((r) => r.tableName === "memberships" || r.tableName === "membership_locations")).toBe(false);
     expect(nadineRows.some((r) => r.tableName === "exchange_rates")).toBe(true); // business-wide, not team
     expect(nadineRows.filter((r) => r.tableName === "business_days").map((r) => r.rowId)).not.toContain(day.hamra);
 
-    const ownerRows = await getAuditTrail(db, await scope("rana"), 500);
+    const ownerRows = (await getAuditTrail(db, await scope("rana"), 500)).rows;
     expect(ownerRows.some((r) => r.tableName === "membership_locations")).toBe(true);
   });
 });

@@ -39,9 +39,13 @@ export type MovementRow = {
   direction: "in" | "out";
   currency: Currency;
   amountMinor: bigint;
-  /** USD equivalent at the rate of the day it belongs to. */
+  /** USD equivalent at the applied rate of the day it belongs to. */
   eq: bigint;
+  /** The day's own LBP-per-USD rate (scaled), locked when the day was opened. */
+  rate: bigint;
   reason: string;
+  /** Who took the cash, on a partner withdrawal. */
+  partnerName: string | null;
   enteredBy: string | null;
 };
 
@@ -82,7 +86,9 @@ export async function listMovements(db: DB, scope: TenantScope, filter: ReportFi
       currency: r.m.currency,
       amountMinor: r.m.amountMinor,
       eq: convert(r.m.amountMinor, r.m.currency, "USD", parseRate(r.rate)),
+      rate: parseRate(r.rate),
       reason: r.m.reason,
+      partnerName: r.m.partnerName,
       enteredBy: r.enteredBy,
     }));
   });

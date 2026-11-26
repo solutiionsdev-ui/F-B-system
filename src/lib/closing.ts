@@ -1,11 +1,14 @@
-// Expected-vs-counted cash for one business day, per currency.
+// Expected-vs-counted cash for one business day, per currency (spec 12.1, 12.2).
 //
-// expected = opening float
-//          + cash payments taken           (POS end-of-day report)
+// expected = adjusted opening float       (original float + float adjustments, used once)
+//          + cash payments taken          (POS end-of-day report)
 //          - cash refunds given back
 //          - expenses paid out of the drawer
-//          + cash put in (change top-ups)
-//          - cash taken out (safe drops, owner withdrawals)
+//          - cash movements out           (safe drops, bank deposits, partner withdrawals)
+//          + cash put in                  (older entries only)
+//
+// Card and delivery-app (Toters, NokNok) payments are collected sales but
+// never drawer cash.
 //
 // Each currency is reconciled and judged on its own (spec 12.4): a USD overage
 // can never hide an LBP shortage. The USD-equivalent of the combined
@@ -14,9 +17,20 @@
 // the closed day counts as Balanced or Flagged.
 import { CURRENCIES, type Currency, type Pair, usdEquivalent, zeroPair } from "./money";
 
+/** Payment types. Only cash enters a drawer; Toters and NokNok are delivery apps. */
+export const TENDERS = ["cash", "card", "toters", "noknok", "other"] as const;
+export type Tender = (typeof TENDERS)[number];
+export const TENDER_LABELS: Record<Tender, string> = {
+  cash: "Cash",
+  card: "Card",
+  toters: "Delivery apps: Toters",
+  noknok: "Delivery apps: NokNok",
+  other: "Other",
+};
+
 export type SalesLineInput = {
   lineType: "payment" | "refund" | "discount" | "void" | "tax" | "service_charge";
-  tender: "cash" | "card" | "other" | null;
+  tender: Tender | null;
   currency: Currency;
   amountMinor: bigint;
 };
@@ -26,10 +40,21 @@ export type ExpenseInput = {
   currency: Currency;
   amountMinor: bigint;
 };
-export type MovementInput = { direction: "in" | "out"; currency: Currency; amountMinor: bigint };
+export type MovementInput = {
+  direction: "in" | "out";
+  currency: Currency;
+  amountMinor: bigint;
+  /** "float_adjustment" changes the opening float instead of counting as a movement. */
+  kind?: string | null;
+};
 
 export type ExpectedBreakdown = {
+  /** The float the day was opened with; never overwritten. */
   openingFloat: Pair;
+  /** Signed sum of opening float adjustments. */
+  floatAdjustments: Pair;
+  /** openingFloat + floatAdjustments: what the expected cash starts from. */
+  adjustedFloat: Pair;
   cashPayments: Pair;
   cashRefunds: Pair;
   drawerExpenses: Pair;
@@ -49,6 +74,7 @@ export function computeExpected(input: {
   const drawerExpenses = zeroPair();
   const movementsIn = zeroPair();
   const movementsOut = zeroPair();
+  const floatAdjustments = zeroPair();
 
   for (const s of input.sales) {
     if (s.tender !== "cash") continue;
@@ -59,15 +85,28 @@ export function computeExpected(input: {
     if (e.status === "active" && e.paidFrom === "drawer") drawerExpenses[e.currency] += e.amountMinor;
   }
   for (const m of input.movements) {
-    (m.direction === "in" ? movementsIn : movementsOut)[m.currency] += m.amountMinor;
+    if (m.kind === "float_adjustment") floatAdjustments[m.currency] += m.direction === "in" ? m.amountMinor : -m.amountMinor;
+    else (m.direction === "in" ? movementsIn : movementsOut)[m.currency] += m.amountMinor;
   }
 
+  const adjustedFloat = zeroPair();
   const expected = zeroPair();
   for (const c of CURRENCIES) {
-    expected[c] =
-      input.openingFloat[c] + cashPayments[c] - cashRefunds[c] - drawerExpenses[c] + movementsIn[c] - movementsOut[c];
+    // The adjustment is counted here and nowhere else, so it can't be applied twice.
+    adjustedFloat[c] = input.openingFloat[c] + floatAdjustments[c];
+    expected[c] = adjustedFloat[c] + cashPayments[c] - cashRefunds[c] - drawerExpenses[c] + movementsIn[c] - movementsOut[c];
   }
-  return { openingFloat: input.openingFloat, cashPayments, cashRefunds, drawerExpenses, movementsIn, movementsOut, expected };
+  return {
+    openingFloat: input.openingFloat,
+    floatAdjustments,
+    adjustedFloat,
+    cashPayments,
+    cashRefunds,
+    drawerExpenses,
+    movementsIn,
+    movementsOut,
+    expected,
+  };
 }
 
 export type Reconciliation = {
@@ -108,7 +147,7 @@ export function reconcile(expected: Pair, counted: Pair, rate: bigint, tolerance
 
 /** Totals for the day summary (all tenders), in each currency. */
 export function salesSummary(sales: SalesLineInput[]) {
-  const byTender = { cash: zeroPair(), card: zeroPair(), other: zeroPair() };
+  const byTender: Record<Tender, Pair> = { cash: zeroPair(), card: zeroPair(), toters: zeroPair(), noknok: zeroPair(), other: zeroPair() };
   const totals = {
     refunds: zeroPair(),
     discounts: zeroPair(),
@@ -140,7 +179,8 @@ export function salesSummary(sales: SalesLineInput[]) {
   }
   const collected = zeroPair();
   for (const c of CURRENCIES) {
-    collected[c] = byTender.cash[c] + byTender.card[c] + byTender.other[c] - totals.refunds[c];
+    // Every payment type once, less refunds: delivery-app sales count here and never again at payout.
+    collected[c] = TENDERS.reduce((sum, t) => sum + byTender[t][c], 0n) - totals.refunds[c];
   }
   return { byTender, ...totals, collected };
 }

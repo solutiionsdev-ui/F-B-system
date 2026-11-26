@@ -24,7 +24,7 @@ import {
   type PaidFrom,
   type VarianceReason,
 } from "@/db/schema";
-import { salesSummary } from "@/lib/closing";
+import { salesSummary, TENDERS } from "@/lib/closing";
 import { dayStatusOf, type DayStatus } from "@/lib/day-status";
 import { MOVEMENT_KINDS, movementKindOf, type MovementKind } from "@/lib/expense-buckets";
 import { convert, parseRate, usdEquivalent, zeroPair, type Pair } from "@/lib/money";
@@ -67,11 +67,10 @@ export function previousPeriod(f: ReportFilter): ReportFilter {
 
 type SalesBlock = ReturnType<typeof salesSummary>;
 const SALES_KEYS = ["refunds", "discounts", "voids", "tax", "serviceCharge", "collected"] as const;
-const TENDERS = ["cash", "card", "other"] as const;
 
 function emptySales(): SalesBlock {
   return {
-    byTender: { cash: zeroPair(), card: zeroPair(), other: zeroPair() },
+    byTender: { cash: zeroPair(), card: zeroPair(), toters: zeroPair(), noknok: zeroPair(), other: zeroPair() },
     refunds: zeroPair(),
     discounts: zeroPair(),
     voids: zeroPair(),
@@ -86,6 +85,8 @@ function salesEq(s: SalesBlock, rate: bigint) {
   return {
     cash: usdEquivalent(s.byTender.cash, rate),
     card: usdEquivalent(s.byTender.card, rate),
+    toters: usdEquivalent(s.byTender.toters, rate),
+    noknok: usdEquivalent(s.byTender.noknok, rate),
     other: usdEquivalent(s.byTender.other, rate),
     refunds: usdEquivalent(s.refunds, rate),
     discounts: usdEquivalent(s.discounts, rate),
@@ -152,8 +153,11 @@ export type ExpenseRow = {
   date: string;
   locationId: string;
   locationName: string;
+  /** The universal category it is reported under. */
   category: string;
-  /** Notes; '' when none were entered. */
+  /** The older category it was entered under, when that has since been folded into `category`. */
+  originalCategory: string | null;
+  /** Notes; '' on entries from before notes were required. */
   description: string;
   vendor: string | null;
   receiptRef: string | null;
@@ -218,16 +222,19 @@ export async function computePeriodReport(db: DB, scope: TenantScope, filter: Re
       : [];
 
     const entered = alias(users, "entered");
+    const rollup = alias(expenseCategories, "rollup");
     const expRows = await tx
       .select({
         e: expenses,
-        category: expenseCategories.name,
+        ownCategory: expenseCategories.name,
+        rollupCategory: rollup.name,
         locationName: locations.name,
         rate: exchangeRates.lbpPerUsd,
         enteredBy: entered.name,
       })
       .from(expenses)
       .innerJoin(expenseCategories, eq(expenseCategories.id, expenses.categoryId))
+      .leftJoin(rollup, eq(rollup.id, expenseCategories.rollsUpTo))
       .innerJoin(locations, eq(locations.id, expenses.locationId))
       .innerJoin(exchangeRates, eq(exchangeRates.id, expenses.rateId))
       .leftJoin(entered, eq(entered.id, expenses.createdBy))
@@ -248,7 +255,8 @@ export async function computePeriodReport(db: DB, scope: TenantScope, filter: Re
         date: r.e.expenseDate,
         locationId: r.e.locationId,
         locationName: r.locationName,
-        category: r.category,
+        category: r.rollupCategory ?? r.ownCategory,
+        originalCategory: r.rollupCategory ? r.ownCategory : null,
         description: r.e.description,
         vendor: r.e.vendor,
         receiptRef: r.e.receiptRef,
@@ -284,7 +292,9 @@ export async function computePeriodReport(db: DB, scope: TenantScope, filter: Re
         expEq += convert(x.e.amountMinor, x.e.currency, "USD", parseRate(x.rate));
       }
       const drawerOut = zeroPair();
-      for (const m of movesByDay.get(r.day.id) ?? []) if (m.direction === "out") drawerOut[m.currency] += m.amountMinor;
+      for (const m of movesByDay.get(r.day.id) ?? []) {
+        if (m.direction === "out" && m.kind !== "float_adjustment") drawerOut[m.currency] += m.amountMinor;
+      }
       const adj = zeroPair();
       for (const a of adjByDay.get(r.day.id) ?? []) adj[a.currency] += a.amountMinor;
       const adjEq = usdEquivalent(adj, rate);
@@ -355,8 +365,10 @@ export async function computePeriodReport(db: DB, scope: TenantScope, filter: Re
     for (const m of moves) {
       const kind = movementKindOf(m);
       const k = byKind.get(kind) ?? { pair: zeroPair(), eq: 0n, count: 0 };
-      k.pair[m.currency] += m.amountMinor;
-      k.eq += convert(m.amountMinor, m.currency, "USD", rateByDay.get(m.businessDayId)!);
+      // A float adjustment can go either way, so its total is signed.
+      const signed = kind === "float_adjustment" && m.direction === "out" ? -m.amountMinor : m.amountMinor;
+      k.pair[m.currency] += signed;
+      k.eq += convert(signed, m.currency, "USD", rateByDay.get(m.businessDayId)!);
       k.count += 1;
       byKind.set(kind, k);
     }
@@ -396,7 +408,14 @@ export async function computePeriodReport(db: DB, scope: TenantScope, filter: Re
       const ds = daily.filter((d) => d.locationId === l.id);
       const expEq = activeExpenses.filter((e) => e.locationId === l.id).reduce((s, e) => s + e.eq, 0n);
       const collectedEq = ds.reduce((s, d) => s + d.salesEq.collected, 0n);
+      // Each currency on its own, after corrections (v2.1 branch comparison).
+      const varianceAfterPair = zeroPair();
+      for (const d of ds) if (d.varianceAfter) addPair(varianceAfterPair, d.varianceAfter);
+      // The physical cash found at the latest close in the period: what was really in the drawer, not a calculation.
+      const lastClosed = [...ds].filter((d) => d.closing).sort((a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : 0))[0];
       return {
+        varianceAfter: varianceAfterPair,
+        lastCount: lastClosed ? { date: lastClosed.date, counted: lastClosed.closing!.counted } : null,
         locationId: l.id,
         name: l.name,
         days: ds.length,
@@ -410,7 +429,7 @@ export async function computePeriodReport(db: DB, scope: TenantScope, filter: Re
     });
 
     const rates = [...new Set(daily.map((d) => d.rate))].sort((a, b) => (a < b ? -1 : a > b ? 1 : 0));
-    // The same status query Today and Cash Closing use, so the counts always agree.
+    // The same status query Today and Cash Close use, so the counts always agree.
     const status = await statusSummaryIn(tx, f);
 
     return {

@@ -21,7 +21,6 @@ import {
   openDay,
   saveCount,
   saveManualSales,
-  setOpeningFloat,
   setRate,
   todayIn,
   UserError,
@@ -83,7 +82,9 @@ async function run(
   } catch (e) {
     return { error: toMessage(e) };
   }
-  for (const p of revalidate) revalidatePath(p);
+  // Three tabs read the same figures, so every save refreshes all of them.
+  void revalidate;
+  revalidatePath("/", "layout");
   return { ok, at: Date.now() };
 }
 
@@ -136,10 +137,11 @@ export async function setRateAction(_: ActionState, fd: FormData) {
     (ctx, db) =>
       setRate(db, ctx.scope, {
         lbpPerUsd: str(fd, "rate"),
-        source: (str(fd, "source") || "market") as "market" | "bank" | "custom",
+        // Required: setRate refuses a rate without a source.
+        source: str(fd, "source") as "market" | "bank" | "custom",
         note: str(fd, "note"),
       }),
-    ["/", "/settings"],
+    ["/", "/rates", "/settings"],
     "New rate saved. Days opened from now on will use it.",
   );
 }
@@ -149,7 +151,6 @@ export async function setRateAction(_: ActionState, fd: FormData) {
 export async function openDayAction(_: ActionState, fd: FormData): Promise<ActionState> {
   const ctx = await requireContext();
   const db = await getDb();
-  let id: string;
   try {
     const day = await openDay(db, ctx.scope, {
       locationId: str(fd, "locationId"),
@@ -159,30 +160,19 @@ export async function openDayAction(_: ActionState, fd: FormData): Promise<Actio
         LBP: field(fd, "float_LBP", "LBP", "Opening float (LBP)"),
       },
     });
-    id = day.id;
+    void day;
   } catch (e) {
     return { error: toMessage(e) };
   }
-  revalidatePath("/");
-  redirect(`/days/${id}`);
-}
-
-export async function setOpeningFloatAction(_: ActionState, fd: FormData) {
-  const dayId = str(fd, "dayId");
-  return run(
-    (ctx, db) =>
-      setOpeningFloat(db, ctx.scope, dayId, {
-        USD: field(fd, "float_USD", "USD", "Opening float (USD)"),
-        LBP: field(fd, "float_LBP", "LBP", "Opening float (LBP)"),
-      }),
-    [`/days/${dayId}`],
-    "Opening float saved",
-  );
+  revalidatePath("/", "layout");
+  redirect(`/close?date=${encodeURIComponent(str(fd, "businessDate"))}`);
 }
 
 const SALES_FIELDS: { key: keyof SalesTotalsInput; label: string }[] = [
   { key: "cash", label: "Cash payments" },
   { key: "card", label: "Card payments" },
+  { key: "toters", label: "Delivery apps: Toters" },
+  { key: "noknok", label: "Delivery apps: NokNok" },
   { key: "other", label: "Other payments" },
   { key: "cashRefunds", label: "Cash refunds" },
   { key: "discounts", label: "Discounts" },
@@ -251,16 +241,18 @@ export async function addMovementAction(_: ActionState, fd: FormData) {
         currency,
         amountMinor: field(fd, "amount", currency, "Amount", false),
         reason: str(fd, "reason"),
+        partnerName: str(fd, "partnerName"),
+        direction: str(fd, "direction") === "out" ? "out" : str(fd, "direction") === "in" ? "in" : undefined,
       });
     },
-    [`/days/${dayId}`, "/cash", "/closing"],
+    [`/days/${dayId}`, "/expenses", "/closing"],
     "Cash movement recorded",
   );
 }
 
 export async function deleteMovementAction(_: ActionState, fd: FormData) {
   const dayId = str(fd, "dayId");
-  return run((ctx, db) => deleteMovement(db, ctx.scope, str(fd, "movementId")), [`/days/${dayId}`, "/cash", "/closing"], "Removed");
+  return run((ctx, db) => deleteMovement(db, ctx.scope, str(fd, "movementId")), [`/days/${dayId}`, "/expenses", "/closing"], "Removed");
 }
 
 export async function saveCountAction(_: ActionState, fd: FormData) {
@@ -326,7 +318,7 @@ export async function addLocationAction(_: ActionState, fd: FormData) {
   return run(
     (ctx, db) => addLocation(db, ctx.scope, str(fd, "name"), str(fd, "venueType") || "other"),
     ["/settings", "/team", "/"],
-    "Location added. Assign people to it in Team & Access.",
+    "Location added. Assign people to it in Team & Permissions.",
   );
 }
 
@@ -374,8 +366,7 @@ async function inviteResult(
   const db = await getDb();
   try {
     const { token, email } = await fn(ctx, db);
-    revalidatePath("/team");
-    revalidatePath("/");
+    revalidatePath("/", "layout");
     return { ok, at: Date.now(), data: { path: `/invite/${token}`, email } };
   } catch (e) {
     return { error: toMessage(e) };
@@ -498,8 +489,7 @@ export async function discardImportAction(importId: string): Promise<ActionState
   } catch (e) {
     return { error: toMessage(e) };
   }
-  revalidatePath("/import");
-  revalidatePath("/");
+  revalidatePath("/", "layout");
   return { ok: "File discarded", at: Date.now() };
 }
 
@@ -523,18 +513,68 @@ export async function quickOpenDayAction(locationId: string): Promise<ActionStat
   } catch (e) {
     return { error: toMessage(e) };
   }
-  revalidatePath("/");
-  redirect(`/days/${id}#count`);
+  revalidatePath("/", "layout");
+  redirect(`/days/${id}#step-3`);
 }
 
 /** Import page: discard the draft and go back to the list. */
 export async function discardImportAndReturnAction(importId: string): Promise<ActionState> {
   const res = await discardImportAction(importId);
   if (res.error) return res;
-  redirect("/import");
+  redirect("/settings/pos");
 }
 
 /** "Needs you": make a fresh invite link (the old one stops working). */
 export async function quickRenewInviteAction(inviteId: string) {
   return inviteResult((ctx, db) => renewInvite(db, ctx.scope, inviteId), "New link created");
+}
+
+// ---------------------------------------------------------------- Daily Close (v2.1)
+
+const closeUrl = (date: string, extra = "") => `/close?date=${encodeURIComponent(date)}${extra}`;
+
+/** Step 1: read the file into a draft for this branch and come back to Daily Close to preview it. Nothing is posted. */
+export async function uploadForCloseAction(_: ActionState, fd: FormData): Promise<ActionState> {
+  const ctx = await requireContext();
+  const db = await getDb();
+  const file = fd.get("file");
+  const date = str(fd, "date");
+  if (!(file instanceof File) || file.size === 0) return { error: "Choose the Omega CSV or Excel export to upload." };
+  let id: string;
+  try {
+    id = await createImportDraft(db, ctx.scope, {
+      locationId: str(fd, "locationId"),
+      fileName: file.name,
+      bytes: new Uint8Array(await file.arrayBuffer()),
+    });
+  } catch (e) {
+    return { error: toMessage(e) };
+  }
+  revalidatePath("/", "layout");
+  redirect(closeUrl(date, `&import=${id}#step-1`));
+}
+
+/**
+ * Step 1: post a previewed draft onto the open day, after the person confirms.
+ * Missing days are never opened from here: the day was opened with its float
+ * first. Posting twice is refused (the draft is posted once, and rows already
+ * imported are skipped by their POS reference).
+ */
+export async function confirmCloseImportAction(importId: string, date: string, _: ActionState, fd: FormData): Promise<ActionState> {
+  void fd;
+  const ctx = await requireContext();
+  const db = await getDb();
+  try {
+    await postImport(db, ctx.scope, importId, { createMissingDays: false });
+  } catch (e) {
+    return { error: toMessage(e) };
+  }
+  revalidatePath("/", "layout");
+  redirect(closeUrl(date, "#step-1"));
+}
+
+export async function discardCloseImportAction(importId: string, date: string): Promise<ActionState> {
+  const res = await discardImportAction(importId);
+  if (res.error) return res;
+  redirect(closeUrl(date, "#step-1"));
 }

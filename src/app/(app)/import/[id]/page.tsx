@@ -3,7 +3,7 @@ import { notFound } from "next/navigation";
 import { applyProfileAction, discardImportAndReturnAction, postImportAction, saveMappingAction, undoImportAction } from "@/app/actions";
 import { ActionForm } from "@/components/action-form";
 import { Badge, Card, Field, formatDate, formatTime, inlineInputClass, inputClass, Money, PageTitle } from "@/components/ui";
-import { formatRate, parseRate } from "@/lib/money";
+import { formatAmount, formatRate, parseRate } from "@/lib/money";
 import { requireContext } from "@/server/auth";
 import { getDb } from "@/server/db";
 import { getImport } from "@/server/pos-import";
@@ -44,8 +44,12 @@ export default async function ImportDetailPage({ params }: { params: Promise<{ i
         subtitle={
           <>
             {data.location.name} · {imp.rowCount} rows · uploaded {formatTime(imp.createdAt)} ·{" "}
-            <Link href="/import" className="underline">
-              all imports
+            <Link href="/close#step-1" className="underline">
+              back to Daily Close
+            </Link>{" "}
+            ·{" "}
+            <Link href="/settings/pos" className="underline">
+              import history
             </Link>
           </>
         }
@@ -189,6 +193,51 @@ export default async function ImportDetailPage({ params }: { params: Promise<{ i
                         different payments, add another ID column (like a payment line number).
                       </p>
                     )}
+                    <div className="rounded-xl border border-stone-200 p-3">
+                      <h3 className="mb-2 text-sm font-semibold text-stone-800">What will be posted</h3>
+                      <dl className="grid grid-cols-1 gap-x-6 gap-y-1 text-sm sm:grid-cols-2">
+                        {(
+                          [
+                            ["Cash (USD)", p.totals.byTender.cash.USD, "USD"],
+                            ["Cash (LBP)", p.totals.byTender.cash.LBP, "LBP"],
+                            ["Card", p.totals.byTender.card.USD, "USD"],
+                            ["Delivery apps (Toters)", p.totals.byTender.toters.USD, "USD"],
+                            ["Delivery apps (NokNok)", p.totals.byTender.noknok.USD, "USD"],
+                            ["Other payments", p.totals.byTender.other.USD, "USD"],
+                            ["Refunds", p.totals.refunds.USD, "USD"],
+                            ["Discounts", p.totals.discounts.USD, "USD"],
+                            ["Voids", p.totals.voids.USD, "USD"],
+                            ["VAT", p.totals.tax.USD, "USD"],
+                          ] as const
+                        ).map(([label, minor, cur]) => (
+                          <div key={label} className="flex items-baseline justify-between gap-3">
+                            <dt className="text-stone-600">{label}</dt>
+                            <dd>
+                              <Money minor={minor} currency={cur} className={minor === 0n ? "text-stone-300" : "font-medium"} />
+                            </dd>
+                          </div>
+                        ))}
+                      </dl>
+                      {(["card", "toters", "noknok", "other"] as const).some((t) => p.totals.byTender[t].LBP !== 0n) ||
+                      (["refunds", "discounts", "voids", "tax"] as const).some((k) => p.totals[k].LBP !== 0n) ? (
+                        <p className="mt-2 text-xs text-stone-500">
+                          Also in LBP:{" "}
+                          {[
+                            ...(["card", "toters", "noknok", "other"] as const).map((t) => [t, p.totals.byTender[t].LBP] as const),
+                            ...(["refunds", "discounts", "voids", "tax"] as const).map((k) => [k, p.totals[k].LBP] as const),
+                          ]
+                            .filter(([, v]) => v !== 0n)
+                            .map(([k, v]) => `${k} ${formatAmount(v, "LBP")}`)
+                            .join(", ")}
+                          .
+                        </p>
+                      ) : null}
+                      <p className="mt-2 border-t border-stone-100 pt-2 text-xs text-stone-500">
+                        Collected ≈ <Money minor={p.totals.collectedEq} currency="USD" className="font-medium text-stone-800" /> at each
+                        day&apos;s rate. Only cash goes into the drawer; card and delivery-app sales never do. Discounts, voids and VAT are
+                        shown for checking and are not deducted again.
+                      </p>
+                    </div>
                     <div className="overflow-x-auto">
                       <table className="w-full text-sm">
                         <thead className="text-left font-mono text-[10.5px] font-medium uppercase tracking-[0.06em] text-stone-400">
@@ -212,6 +261,12 @@ export default async function ImportDetailPage({ params }: { params: Promise<{ i
                                 {d.rate && <div className="mt-1 text-xs text-stone-500">Rate {formatRate(parseRate(d.rate))}</div>}
                                 {d.rateNote && <div className="text-xs text-amber-700">{d.rateNote}</div>}
                                 {d.blocked && <div className="mt-1 text-xs font-medium text-red-700">{d.blocked}</div>}
+                                {!d.blocked && d.otherImportLines > 0 && (
+                                  <div className="mt-1 text-xs font-medium text-amber-700">
+                                    This day already has {d.otherImportLines} imported line{d.otherImportLines === 1 ? "" : "s"} from another
+                                    file. Check it isn&apos;t the same day twice.
+                                  </div>
+                                )}
                               </td>
                               <td className="num py-2 pr-2 text-right text-stone-700">
                                 {d.toImport}
@@ -219,16 +274,17 @@ export default async function ImportDetailPage({ params }: { params: Promise<{ i
                               </td>
                               <td className="py-2 pr-2 text-right">
                                 <div>
-                                  <Money minor={d.cash.USD} currency="USD" />
+                                  <Money minor={d.byTender.cash.USD} currency="USD" />
                                 </div>
                                 <div className="text-xs text-stone-500">
-                                  <Money minor={d.cash.LBP} currency="LBP" />
+                                  <Money minor={d.byTender.cash.LBP} currency="LBP" />
                                 </div>
                               </td>
                               <td className="py-2 text-right">
                                 <Money minor={d.collectedEq} currency="USD" className="font-medium" />
                                 <div className="text-xs text-stone-500">
-                                  card <Money minor={d.card.USD} currency="USD" />
+                                  card <Money minor={d.byTender.card.USD} currency="USD" /> · apps{" "}
+                                  <Money minor={d.byTender.toters.USD + d.byTender.noknok.USD} currency="USD" />
                                 </div>
                               </td>
                             </tr>
