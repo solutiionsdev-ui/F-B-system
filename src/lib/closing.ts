@@ -7,8 +7,11 @@
 //          + cash put in (change top-ups)
 //          - cash taken out (safe drops, owner withdrawals)
 //
-// Each currency is reconciled on its own; the USD-equivalent of the combined
-// difference at the day's rate decides whether the day is within tolerance.
+// Each currency is reconciled and judged on its own (spec 12.4): a USD overage
+// can never hide an LBP shortage. The USD-equivalent of the combined
+// difference is kept for reporting only. Any difference in either currency
+// needs a written explanation; the per-currency allowance only decides whether
+// the closed day counts as Balanced or Flagged.
 import { CURRENCIES, type Currency, type Pair, usdEquivalent, zeroPair } from "./money";
 
 export type SalesLineInput = {
@@ -70,17 +73,37 @@ export function computeExpected(input: {
 export type Reconciliation = {
   expected: Pair;
   counted: Pair;
-  /** counted - expected. Negative means cash is missing. */
+  /** counted - expected, per currency. Negative means cash is missing. */
   variance: Pair;
+  /** Both differences at the day's rate, for reporting only. Never used to judge the day. */
   varianceEquivCents: bigint;
+  /** Zero difference in both currencies. */
+  balanced: boolean;
+  /** Each currency's difference is within that currency's allowance: closes as Balanced. */
   withinTolerance: boolean;
+  /** Either currency has a difference: a reason and a written explanation are required. */
+  needsExplanation: boolean;
 };
 
-export function reconcile(expected: Pair, counted: Pair, rate: bigint, toleranceCents: bigint): Reconciliation {
+const abs = (v: bigint) => (v < 0n ? -v : v);
+
+/** Whether every currency's amount is within that currency's allowance. */
+export function withinAllowance(variance: Pair, tolerance: Pair): boolean {
+  return CURRENCIES.every((c) => abs(variance[c]) <= tolerance[c]);
+}
+
+export function reconcile(expected: Pair, counted: Pair, rate: bigint, tolerance: Pair): Reconciliation {
   const variance: Pair = { USD: counted.USD - expected.USD, LBP: counted.LBP - expected.LBP };
-  const varianceEquivCents = usdEquivalent(variance, rate);
-  const abs = varianceEquivCents < 0n ? -varianceEquivCents : varianceEquivCents;
-  return { expected, counted, variance, varianceEquivCents, withinTolerance: abs <= toleranceCents };
+  const balanced = variance.USD === 0n && variance.LBP === 0n;
+  return {
+    expected,
+    counted,
+    variance,
+    varianceEquivCents: usdEquivalent(variance, rate),
+    balanced,
+    withinTolerance: withinAllowance(variance, tolerance),
+    needsExplanation: !balanced,
+  };
 }
 
 /** Totals for the day summary (all tenders), in each currency. */

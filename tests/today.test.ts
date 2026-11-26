@@ -112,7 +112,7 @@ describe("insights", () => {
     const open = dash.openDays.find((d) => d.locationId === hamraId)!;
     await saveCount(database.db, manager, { dayId: open.id, currency: "USD", denominations: {}, looseMinor: 0n });
     await saveCount(database.db, manager, { dayId: open.id, currency: "LBP", denominations: {}, looseMinor: 0n });
-    await closeDay(database.db, manager, open.id, { reason: "suspected_loss" });
+    await closeDay(database.db, manager, open.id, { reason: "suspected_loss", note: "The drawer was empty at closing." });
 
     const after = await getToday(database.db, owner);
     const insight = after.insights.find((i) => i.key === `short-${hamraId}`)!;

@@ -36,24 +36,40 @@ describe("computeExpected", () => {
 describe("reconcile", () => {
   const rate = parseRate("89500");
 
+  const none = { USD: 0n, LBP: 0n };
+
   it("balances when the count matches", () => {
-    const r = reconcile({ USD: 48500n, LBP: 21_150_000n }, { USD: 48500n, LBP: 21_150_000n }, rate, 100n);
+    const r = reconcile({ USD: 48500n, LBP: 21_150_000n }, { USD: 48500n, LBP: 21_150_000n }, rate, none);
     expect(r.variance).toEqual({ USD: 0n, LBP: 0n });
+    expect(r.balanced).toBe(true);
     expect(r.withinTolerance).toBe(true);
+    expect(r.needsExplanation).toBe(false);
   });
 
-  it("flags a shortage in LBP using the USD-equivalent", () => {
-    const r = reconcile({ USD: 48500n, LBP: 21_150_000n }, { USD: 48500n, LBP: 19_360_000n }, rate, 100n);
+  it("flags a shortage in LBP and keeps the USD-equivalent for reporting", () => {
+    const r = reconcile({ USD: 48500n, LBP: 21_150_000n }, { USD: 48500n, LBP: 19_360_000n }, rate, none);
     expect(r.variance.LBP).toBe(-1_790_000n);
     expect(r.varianceEquivCents).toBe(-2000n);
     expect(r.withinTolerance).toBe(false);
+    expect(r.needsExplanation).toBe(true);
   });
 
-  it("lets a USD overage and an LBP shortage offset within tolerance", () => {
-    // +$5 in USD, -447,500 LBP (= -$5): nets to zero at the day's rate
-    const r = reconcile({ USD: 0n, LBP: 447_500n }, { USD: 500n, LBP: 0n }, rate, 100n);
+  it("never lets a USD overage and an LBP shortage cancel out", () => {
+    // +$5 in USD, -447,500 LBP (= -$5): zero combined, but both drawers are wrong.
+    const r = reconcile({ USD: 0n, LBP: 447_500n }, { USD: 500n, LBP: 0n }, rate, { USD: 100n, LBP: 0n });
     expect(r.varianceEquivCents).toBe(0n);
-    expect(r.withinTolerance).toBe(true);
+    expect(r.balanced).toBe(false);
+    expect(r.withinTolerance).toBe(false);
+    expect(r.needsExplanation).toBe(true);
+  });
+
+  it("judges each currency against its own allowance", () => {
+    const tol = { USD: 100n, LBP: 50_000n };
+    const within = reconcile({ USD: 10000n, LBP: 1_000_000n }, { USD: 9950n, LBP: 960_000n }, rate, tol);
+    expect(within.withinTolerance).toBe(true);
+    expect(within.needsExplanation).toBe(true); // allowed, but still explained
+    const over = reconcile({ USD: 10000n, LBP: 1_000_000n }, { USD: 10000n, LBP: 940_000n }, rate, tol);
+    expect(over.withinTolerance).toBe(false);
   });
 });
 

@@ -292,6 +292,7 @@ export async function closeDayAction(_: ActionState, fd: FormData) {
       closeDay(db, ctx.scope, dayId, {
         reason: (str(fd, "reason") || null) as VarianceReason | null,
         note: str(fd, "note"),
+        noSalesReason: str(fd, "noSalesReason"),
       }),
     [`/days/${dayId}`, "/"],
     "Day closed and locked",
@@ -376,7 +377,12 @@ export async function removeMemberAction(_: ActionState, fd: FormData) {
 
 export async function updateSettingsAction(_: ActionState, fd: FormData) {
   return run(
-    (ctx, db) => updateSettings(db, ctx.scope, { name: str(fd, "name"), tolerance: str(fd, "tolerance") }),
+    (ctx, db) =>
+      updateSettings(db, ctx.scope, {
+        name: str(fd, "name"),
+        toleranceUsd: str(fd, "toleranceUsd"),
+        toleranceLbp: str(fd, "toleranceLbp"),
+      }),
     ["/settings", "/"],
     "Settings saved",
   );

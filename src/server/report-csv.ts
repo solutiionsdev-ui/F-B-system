@@ -60,9 +60,13 @@ export function dailyCsv(r: PeriodReport): string {
     "difference_usd_equiv",
     "adjustments_usd_equiv",
     "difference_after_adjustments_usd_equiv",
+    "difference_after_adjustments_usd",
+    "difference_after_adjustments_lbp",
     "within_tolerance",
+    "day_status",
     "difference_reason",
     "closing_note",
+    "no_sales_reason",
     "closed_by",
   ];
   const rows = r.daily.map((d) => {
@@ -93,9 +97,13 @@ export function dailyCsv(r: PeriodReport): string {
       c ? usd(c.varianceEq) : null,
       usd(d.adjustmentsEq),
       d.varianceAfterEq == null ? null : usd(d.varianceAfterEq),
+      d.varianceAfter ? amt(d.varianceAfter.USD, "USD") : null,
+      d.varianceAfter ? amt(d.varianceAfter.LBP, "LBP") : null,
       c ? c.withinTolerance : null,
+      d.dayStatus,
       c?.reason ?? null,
       c?.note ?? null,
+      c?.noSalesReason ?? null,
       c?.closedByName ?? null,
     ];
   });

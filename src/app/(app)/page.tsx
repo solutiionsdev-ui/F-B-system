@@ -143,15 +143,20 @@ export default async function TodayPage() {
         />
         <StatTile
           label="Cash difference · 7 days"
-          value={<Money minor={kpis.difference.value} currency="USD" signed variance />}
+          value={
+            <span className="block space-y-1">
+              <Money minor={kpis.difference.value.USD} currency="USD" signed variance className="block" />
+              <Money minor={kpis.difference.value.LBP} currency="LBP" signed variance className="block text-lg" />
+            </span>
+          }
           chip={
             kpis.difference.flagged ? (
               <Badge tone="bad">{kpis.difference.flagged} flagged</Badge>
             ) : (
-              <Badge tone="good">Balanced</Badge>
+              <Badge tone="good">None flagged</Badge>
             )
           }
-          sub={`${kpis.difference.closed} days closed, after corrections`}
+          sub={`${kpis.difference.closed} days closed · after corrections · each currency on its own`}
         />
         <Link href="/settings" className="group block min-w-0">
           <StatTile
@@ -172,6 +177,13 @@ export default async function TodayPage() {
         </Link>
       </div>
 
+      <p className="mb-4 text-xs text-stone-500">
+        This month: <span className="num font-medium text-stone-700">{data.status.records}</span> business days ·{" "}
+        <span className="num font-medium text-stone-700">{data.status.closed}</span> closed (
+        <span className="num">{data.status.balanced}</span> balanced, <span className={`num ${data.status.flagged ? "font-medium text-red-700" : ""}`}>{data.status.flagged}</span> flagged) ·{" "}
+        <span className={`num ${data.status.open ? "font-medium text-amber-700" : ""}`}>{data.status.open}</span> open
+      </p>
+
       <Insights items={data.insights} />
 
       <div className="grid items-start gap-6 lg:grid-cols-[minmax(0,1fr)_360px] 2xl:grid-cols-[minmax(0,1fr)_420px]">
@@ -191,8 +203,8 @@ export default async function TodayPage() {
                       <h3 className="min-w-0 truncate font-semibold text-stone-900">{loc.name}</h3>
                       {!day && <Badge>Not opened</Badge>}
                       {day?.status === "open" && <Badge tone="accent">Open</Badge>}
-                      {day?.status === "closed" &&
-                        (day.withinTolerance ? <Badge tone="good">Balanced</Badge> : <Badge tone="bad">Flagged</Badge>)}
+                      {day?.dayStatus === "closed_balanced" && <Badge tone="good">Balanced</Badge>}
+                      {day?.dayStatus === "closed_flagged" && <Badge tone="bad">Flagged</Badge>}
                     </div>
                     <div className="mt-3 flex-1">
                       {day ? (
@@ -203,8 +215,8 @@ export default async function TodayPage() {
                           </div>
                           {day.status === "closed" && (
                             <div className="mt-1 text-xs text-stone-500">
-                              Difference{" "}
-                              <Money minor={day.varianceEquivCents ?? 0n} currency="USD" signed variance className="font-medium" />
+                              Difference <Money minor={day.varianceUsd ?? 0n} currency="USD" signed variance className="font-medium" /> ·{" "}
+                              <Money minor={day.varianceLbp ?? 0n} currency="LBP" signed variance className="font-medium" />
                             </div>
                           )}
                         </>
@@ -233,7 +245,7 @@ export default async function TodayPage() {
             </div>
           </section>
 
-          <Card title="Recent days" description="Closed days are locked. Differences in USD at that day's rate.">
+          <Card title="Recent days" description="Closed days are locked. Differences are shown in each currency.">
             {dash.recent.length === 0 ? (
               <p className="text-sm text-stone-500">No business days yet.</p>
             ) : (
@@ -244,7 +256,8 @@ export default async function TodayPage() {
                       <th className="px-5 py-2.5">Date</th>
                       <th className="px-3 py-2.5">Location</th>
                       <th className="px-3 py-2.5">Status</th>
-                      <th className="px-3 py-2.5 text-right">Difference</th>
+                      <th className="px-3 py-2.5 text-right">USD difference</th>
+                      <th className="px-3 py-2.5 text-right">LBP difference</th>
                       <th className="px-5 py-2.5">Closed by</th>
                     </tr>
                   </thead>
@@ -258,20 +271,19 @@ export default async function TodayPage() {
                         </td>
                         <td className="px-3 py-3 text-stone-700">{d.locationName}</td>
                         <td className="px-3 py-3">
-                          {d.status === "open" ? (
+                          {d.dayStatus === "open" ? (
                             <Badge tone="accent">Open</Badge>
-                          ) : d.withinTolerance ? (
+                          ) : d.dayStatus === "closed_balanced" ? (
                             <Badge tone="good">Balanced</Badge>
                           ) : (
-                            <Badge tone="bad">{d.varianceReason ? REASON_LABELS[d.varianceReason] : "Flagged"}</Badge>
+                            <Badge tone="bad">{d.varianceReason ? `Flagged · ${REASON_LABELS[d.varianceReason]}` : "Flagged"}</Badge>
                           )}
                         </td>
-                        <td className="px-3 py-3 text-right">
-                          {d.varianceEquivCents != null ? (
-                            <Money minor={d.varianceEquivCents} currency="USD" signed variance />
-                          ) : (
-                            <span className="text-stone-300">—</span>
-                          )}
+                        <td className="whitespace-nowrap px-3 py-3 text-right">
+                          {d.varianceUsd != null ? <Money minor={d.varianceUsd} currency="USD" signed variance /> : <span className="text-stone-300">—</span>}
+                        </td>
+                        <td className="whitespace-nowrap px-3 py-3 text-right">
+                          {d.varianceLbp != null ? <Money minor={d.varianceLbp} currency="LBP" signed variance /> : <span className="text-stone-300">—</span>}
                         </td>
                         <td className="whitespace-nowrap px-5 py-3 text-stone-500">{d.closedByName?.replace(/\s*\(.*\)$/, "") ?? ""}</td>
                       </tr>

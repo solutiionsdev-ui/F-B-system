@@ -28,7 +28,11 @@ export const organizations = pgTable("organizations", {
   name: text("name").notNull(),
   plan: text("plan").$type<"single" | "multi" | "enterprise">().notNull().default("single"),
   costDataVerified: boolean("cost_data_verified").notNull().default(false),
+  /** Superseded by the per-currency allowances below; kept for history. */
   varianceToleranceCents: money("variance_tolerance_cents").notNull().default(100n),
+  /** Approved rounding allowance per currency: decides Balanced vs Flagged, never skips the explanation. */
+  toleranceUsdCents: money("tolerance_usd_cents").notNull().default(0n),
+  toleranceLbp: money("tolerance_lbp").notNull().default(0n),
   createdAt: ts("created_at").notNull().defaultNow(),
 });
 
@@ -191,7 +195,13 @@ export const dayClosings = pgTable("day_closings", {
   varianceEquivCents: money("variance_equiv_cents").notNull(),
   withinTolerance: boolean("within_tolerance").notNull(),
   varianceReason: text("variance_reason").$type<VarianceReason>(),
+  /** The written explanation; required when either currency has a difference. */
   note: text("note"),
+  /** The allowances the day was judged with; null on closings from before per-currency judging. */
+  toleranceUsdCents: money("tolerance_usd_cents"),
+  toleranceLbp: money("tolerance_lbp"),
+  /** Why a day closed with no sales recorded. */
+  noSalesReason: text("no_sales_reason"),
   closedBy: uuid("closed_by"),
   closedAt: ts("closed_at").notNull().defaultNow(),
 });

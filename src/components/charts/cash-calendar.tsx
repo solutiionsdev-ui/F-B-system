@@ -1,8 +1,9 @@
 "use client";
 
-// One square per day, Monday-first weeks as columns. Colour is the cash
-// difference after corrections, on a diverging scale: red arm = short, blue
-// arm = over, grey = balanced (within tolerance). Open days are outlined in
+// One square per day, Monday-first weeks as columns. Grey = every day closed
+// that date was balanced. A date with a flagged day is coloured by the size of
+// its difference (USD equivalent after corrections, for scale only) on a
+// diverging scale: red arm = short, blue arm = over. Open days are outlined in
 // the accent; days with no business day are dashed. Every square has its own
 // tooltip and is focusable, and the daily table below is the text version.
 import { useState } from "react";
@@ -19,37 +20,39 @@ const usd = (cents: number) =>
 const longDate = (iso: string) =>
   new Intl.DateTimeFormat("en-GB", { weekday: "short", day: "numeric", month: "short", timeZone: "UTC" }).format(new Date(`${iso}T00:00:00Z`));
 
-function bucket(cents: number, tol: number) {
-  const a = Math.abs(cents);
-  if (a <= tol) return -1;
+/** -1 when nothing closed that date was flagged; otherwise the size step. */
+function bucket(d: CalendarDay) {
+  if (d.flagged === 0) return -1;
+  const a = Math.abs(d.varianceAfterEq);
   return a <= 1000 ? 0 : a <= 5000 ? 1 : 2; // up to $10, up to $50, more
 }
 
-function describe(d: CalendarDay, tol: number) {
+function describe(d: CalendarDay) {
   if (d.closed === 0 && d.open === 0) return "No business day";
   if (d.closed === 0) return `Open, not closed yet`;
-  const b = bucket(d.varianceAfterEq, tol);
-  const state = b < 0 ? "Balanced" : `${d.varianceAfterEq < 0 ? "Short" : "Over"} ${usd(d.varianceAfterEq)}`;
+  const state =
+    bucket(d) < 0
+      ? "Balanced"
+      : `${d.flagged} flagged · ${d.varianceAfterEq <= 0 ? "short" : "over"} about ${usd(d.varianceAfterEq)} after corrections`;
   const extra = d.open ? ` · ${d.open} still open` : "";
   return `${state} · ${d.closed} closed${extra}`;
 }
 
 /** Text inside a fill: white on the darker steps, ink on the lighter ones. */
-function inkOn(d: CalendarDay, tol: number) {
+function inkOn(d: CalendarDay) {
   if (d.closed === 0) return "#57534e";
-  const b = bucket(d.varianceAfterEq, tol);
-  return b >= 1 ? "#ffffff" : "#1c1917";
+  return bucket(d) >= 1 ? "#ffffff" : "#1c1917";
 }
 
-function cellStyle(d: CalendarDay, tol: number): React.CSSProperties {
+function cellStyle(d: CalendarDay): React.CSSProperties {
   if (d.closed === 0 && d.open === 0) return { background: "transparent", border: "1px dashed #d6d3cc" };
   if (d.closed === 0) return { background: "#fff", boxShadow: `inset 0 0 0 1.5px ${ACCENT}` };
-  const b = bucket(d.varianceAfterEq, tol);
+  const b = bucket(d);
   if (b < 0) return { background: BALANCED };
-  return { background: (d.varianceAfterEq < 0 ? SHORT : OVER)[b] };
+  return { background: (d.varianceAfterEq <= 0 ? SHORT : OVER)[b] };
 }
 
-export function CashCalendar({ days, toleranceCents }: { days: CalendarDay[]; toleranceCents: number }) {
+export function CashCalendar({ days }: { days: CalendarDay[] }) {
   const [hover, setHover] = useState<{ d: CalendarDay; x: number; y: number } | null>(null);
   if (days.length === 0) return null;
 
@@ -77,7 +80,7 @@ export function CashCalendar({ days, toleranceCents }: { days: CalendarDay[]; to
   };
   const cellProps = (d: CalendarDay) => ({
     type: "button" as const,
-    "aria-label": `${longDate(d.date)}: ${describe(d, toleranceCents)}`,
+    "aria-label": `${longDate(d.date)}: ${describe(d)}`,
     onPointerEnter: (e: React.PointerEvent<HTMLButtonElement>) => show(d, e.currentTarget),
     onFocus: (e: React.FocusEvent<HTMLButtonElement>) => show(d, e.currentTarget),
     onPointerLeave: () => setHover(null),
@@ -100,7 +103,7 @@ export function CashCalendar({ days, toleranceCents }: { days: CalendarDay[]; to
                 key={d.date}
                 {...cellProps(d)}
                 className="flex aspect-square items-start justify-start rounded-lg p-1.5 text-[11px] font-medium outline-none transition-transform hover:scale-105 focus-visible:scale-105 focus-visible:ring-2 focus-visible:ring-stone-900"
-                style={{ ...cellStyle(d, toleranceCents), color: inkOn(d, toleranceCents) }}
+                style={{ ...cellStyle(d), color: inkOn(d) }}
               >
                 {Number(d.date.slice(8))}
               </button>
@@ -115,7 +118,7 @@ export function CashCalendar({ days, toleranceCents }: { days: CalendarDay[]; to
           style={{ left: hover.x, top: hover.y - 6 }}
         >
           <div className="font-medium">{longDate(hover.d.date)}</div>
-          <div className="text-stone-300">{describe(hover.d, toleranceCents)}</div>
+          <div className="text-stone-300">{describe(hover.d)}</div>
         </div>
       )}
 
@@ -176,7 +179,7 @@ export function CashCalendar({ days, toleranceCents }: { days: CalendarDay[]; to
                     key={d.date}
                     {...cellProps(d)}
                     className="rounded-[4px] outline-none transition-transform hover:scale-110 focus-visible:scale-110 focus-visible:ring-2 focus-visible:ring-stone-900"
-                    style={cellStyle(d, toleranceCents)}
+                    style={cellStyle(d)}
                   />
                 ) : (
                   <span key={`pad-${i}`} />
@@ -193,7 +196,7 @@ export function CashCalendar({ days, toleranceCents }: { days: CalendarDay[]; to
           style={{ left: hover.x, top: hover.y - 6 }}
         >
           <div className="font-medium">{longDate(hover.d.date)}</div>
-          <div className="text-stone-300">{describe(hover.d, toleranceCents)}</div>
+          <div className="text-stone-300">{describe(hover.d)}</div>
         </div>
       )}
 

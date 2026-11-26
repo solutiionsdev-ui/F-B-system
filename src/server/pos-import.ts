@@ -15,6 +15,7 @@ import {
   type Role,
 } from "@/db/schema";
 import { CURRENCIES, parseRate, usdEquivalent, zeroPair, type Currency, type Pair } from "@/lib/money";
+import { pickRateForDate } from "@/lib/rates";
 import {
   completeMapping,
   isMapping,
@@ -116,15 +117,20 @@ async function buildPreview(tx: Tx, imp: { locationId: string; headers: string[]
     for (const f of found) if (f.ref) existingRefs.add(f.ref);
   }
 
-  const rates = await tx
-    .select({ id: exchangeRates.id, rate: exchangeRates.lbpPerUsd, at: exchangeRates.effectiveAt })
-    .from(exchangeRates)
-    .orderBy(asc(exchangeRates.effectiveAt), asc(exchangeRates.createdAt));
+  // Same rule as opening a day by hand (lib/rates.ts): the rate in force at the
+  // end of that business date in the venue's time zone.
+  const rates = await tx.select().from(exchangeRates);
+  const [loc] = await tx.select({ timezone: locations.timezone }).from(locations).where(eq(locations.id, imp.locationId));
+  const now = new Date();
   const rateFor = (date: string) => {
-    const end = new Date(`${date}T23:59:59+02:00`);
-    const inEffect = rates.filter((r) => r.at <= end).at(-1);
-    if (inEffect) return { ...inEffect, note: null };
-    return rates[0] ? { ...rates[0], note: "No rate was set yet on this date, so the earliest rate is used." } : null;
+    const choice = pickRateForDate(rates, date, loc?.timezone ?? "Asia/Beirut", now);
+    if (!choice) return null;
+    return {
+      id: choice.rate.id,
+      rate: choice.rate.lbpPerUsd,
+      at: choice.rate.effectiveAt,
+      note: choice.fallback ? "No rate was set yet on this date, so the earliest rate is used." : null,
+    };
   };
 
   const preview = new Map<string, DayPreview>();

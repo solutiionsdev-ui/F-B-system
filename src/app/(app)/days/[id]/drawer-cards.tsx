@@ -2,6 +2,7 @@ import { addAdjustmentAction, closeDayAction, setOpeningFloatAction } from "@/ap
 import { ActionForm } from "@/components/action-form";
 import { CountForm } from "@/components/count-form";
 import { Badge, Card, Field, formatTime, inputClass, Money, REASON_LABELS } from "@/components/ui";
+import { withinAllowance } from "@/lib/closing";
 import { CURRENCIES, formatAmount, formatRate, toInputValue, usdEquivalent, zeroPair, type Pair } from "@/lib/money";
 import type { DayData } from "./page";
 
@@ -16,6 +17,9 @@ export function DrawerCard({ d }: { d: DayData }) {
   const variance: Pair | null = c ? { USD: c.varianceUsd, LBP: c.varianceLbp } : null;
   const equiv = c ? c.varianceEquivCents : d.recon.varianceEquivCents;
   const within = c ? c.withinTolerance : d.recon.withinTolerance;
+  const diff: Pair = c ? { USD: c.varianceUsd, LBP: c.varianceLbp } : d.recon.variance;
+  const isBalanced = diff.USD === 0n && diff.LBP === 0n;
+  const tol: Pair = c && c.toleranceUsdCents != null && c.toleranceLbp != null ? { USD: c.toleranceUsdCents, LBP: c.toleranceLbp } : d.tolerance;
 
   const lines: { label: string; pair: Pair; muted?: boolean }[] = [
     { label: "Opening float", pair: b.openingFloat },
@@ -90,17 +94,36 @@ export function DrawerCard({ d }: { d: DayData }) {
         ) : (
           <div className="flex flex-wrap items-center justify-between gap-2">
             <span>
-              Combined at {formatRate(d.rateScaled)}: <Money minor={equiv} currency="USD" signed className="font-semibold" />
+              {isBalanced ? (
+                "Both drawers match exactly."
+              ) : (
+                <>
+                  {CURRENCIES.filter((cur) => diff[cur] !== 0n).map((cur, i) => (
+                    <span key={cur}>
+                      {i > 0 && " and "}
+                      <Money minor={diff[cur]} currency={cur} signed className="font-semibold" />
+                    </span>
+                  ))}
+                  <span className="opacity-75">
+                    {" "}
+                    (about <Money minor={equiv} currency="USD" signed /> at {formatRate(d.rateScaled)})
+                  </span>
+                </>
+              )}
             </span>
             {within ? (
-              <Badge tone="good">Balanced</Badge>
+              <Badge tone="good">{c ? "Closed — Balanced" : "Balanced"}</Badge>
             ) : (
-              <Badge tone="bad">{equiv < 0n ? "Cash short" : "Cash over"}</Badge>
+              <Badge tone="bad">{c ? "Closed — Flagged" : "Will be flagged"}</Badge>
             )}
           </div>
         )}
         <div className="mt-1 text-xs opacity-75">
-          Tolerance ±{formatAmount(d.org.varianceToleranceCents, "USD")}, for rounding when change is given in LBP.
+          Each currency is checked on its own.{" "}
+          {tol.USD === 0n && tol.LBP === 0n
+            ? "Any difference flags the day."
+            : `Allowed rounding: ±${formatAmount(tol.USD, "USD")} and ±${formatAmount(tol.LBP, "LBP")}.`}{" "}
+          Any difference needs a written explanation.
         </div>
       </div>
     </Card>
@@ -167,6 +190,7 @@ export function CountCard({ d, canOperate }: { d: DayData; canOperate: boolean }
 }
 
 export function CloseCard({ d, canOperate }: { d: DayData; canOperate: boolean }) {
+  const needsExplanation = d.recon.needsExplanation;
   return (
     <Card step={4} title="Close the day" description="Closing freezes the figures and locks the day.">
       {!canOperate ? (
@@ -178,27 +202,42 @@ export function CloseCard({ d, canOperate }: { d: DayData; canOperate: boolean }
           action={closeDayAction}
           submitLabel="Close and lock day"
           pendingLabel="Closing…"
-          variant={d.recon.withinTolerance ? "primary" : "danger"}
+          variant={needsExplanation || !d.recon.withinTolerance ? "danger" : "primary"}
           confirmText="Closing locks this day. Later corrections need an owner or accountant adjustment. Close now?"
         >
           <input type="hidden" name="dayId" value={d.day.id} />
-          {!d.recon.withinTolerance && (
-            <Field label="Reason for the difference (required)">
-              <select name="reason" required defaultValue="" className={inputClass}>
-                <option value="" disabled>
-                  Choose a reason…
-                </option>
-                {Object.entries(REASON_LABELS).map(([v, l]) => (
-                  <option key={v} value={v}>
-                    {l}
-                  </option>
-                ))}
-              </select>
+          {!d.hasSales && (
+            <Field
+              label="No sales are recorded for this day. Why? (required)"
+              hint="Or import the POS file or enter the totals before closing."
+            >
+              <input name="noSalesReason" required className={inputClass} placeholder="e.g. Closed for a public holiday" />
             </Field>
           )}
-          <Field label={d.recon.withinTolerance ? "Note (optional)" : "What happened?"}>
-            <textarea name="note" rows={2} className={inputClass} />
-          </Field>
+          {needsExplanation && (
+            <>
+              <Field label="Reason for the difference (required)">
+                <select name="reason" required defaultValue="" className={inputClass}>
+                  <option value="" disabled>
+                    Choose a reason…
+                  </option>
+                  {Object.entries(REASON_LABELS).map(([v, l]) => (
+                    <option key={v} value={v}>
+                      {l}
+                    </option>
+                  ))}
+                </select>
+              </Field>
+              <Field label="Explain what happened (required)" hint="Any difference in USD or LBP needs a written explanation.">
+                <textarea name="note" rows={3} required className={inputClass} />
+              </Field>
+            </>
+          )}
+          {!needsExplanation && (
+            <Field label="Note (optional)">
+              <textarea name="note" rows={2} className={inputClass} />
+            </Field>
+          )}
         </ActionForm>
       )}
     </Card>
@@ -211,6 +250,7 @@ export function ClosedSummary({ d, canAdjust }: { d: DayData; canAdjust: boolean
   for (const a of d.adjustments) adj[a.currency] += a.amountMinor;
   const adjusted: Pair = { USD: c.varianceUsd + adj.USD, LBP: c.varianceLbp + adj.LBP };
   const adjustedEquiv = usdEquivalent(adjusted, d.rateScaled);
+  const resolved = withinAllowance(adjusted, d.tolerance);
 
   return (
     <section
@@ -218,18 +258,33 @@ export function ClosedSummary({ d, canAdjust }: { d: DayData; canAdjust: boolean
     >
       <div className="flex flex-wrap items-start justify-between gap-4">
         <div>
-          <h2 className="font-semibold text-stone-900">{c.withinTolerance ? "Closed — the drawer balanced" : "Closed with a difference"}</h2>
+          <h2 className="font-semibold text-stone-900">{c.withinTolerance ? "Closed — Balanced" : "Closed — Flagged"}</h2>
           <p className="mt-1 text-sm text-stone-600">
-            Difference <Money minor={c.varianceEquivCents} currency="USD" signed variance className="font-semibold" /> (
-            <Money minor={c.varianceUsd} currency="USD" signed /> and <Money minor={c.varianceLbp} currency="LBP" signed />)
+            Difference <Money minor={c.varianceUsd} currency="USD" signed variance className="font-semibold" /> and{" "}
+            <Money minor={c.varianceLbp} currency="LBP" signed variance className="font-semibold" />
+            <span className="text-stone-500">
+              {" "}
+              (about <Money minor={c.varianceEquivCents} currency="USD" signed /> at the day&apos;s rate)
+            </span>
             {c.varianceReason && <> · {REASON_LABELS[c.varianceReason]}</>}
           </p>
           {c.note && <p className="mt-2 rounded-lg bg-stone-50 px-3 py-2 text-sm text-stone-700">“{c.note}”</p>}
+          {c.noSalesReason && (
+            <p className="mt-2 rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-900">No sales recorded: “{c.noSalesReason}”</p>
+          )}
         </div>
         {d.adjustments.length > 0 && (
           <div className="text-right text-sm">
-            <div className="text-xs font-medium text-stone-500">After adjustments</div>
-            <Money minor={adjustedEquiv} currency="USD" signed variance className="text-lg font-semibold" />
+            <div className="text-xs font-medium text-stone-500">After corrections</div>
+            <div className="text-lg font-semibold">
+              <Money minor={adjusted.USD} currency="USD" signed variance />
+            </div>
+            <div className="font-semibold">
+              <Money minor={adjusted.LBP} currency="LBP" signed variance />
+            </div>
+            <div className="text-xs text-stone-500">
+              ≈ <Money minor={adjustedEquiv} currency="USD" signed /> · {resolved ? "explained" : "still open for review"}
+            </div>
           </div>
         )}
       </div>

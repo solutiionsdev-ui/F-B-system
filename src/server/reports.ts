@@ -26,8 +26,10 @@ import {
   type VarianceReason,
 } from "@/db/schema";
 import { salesSummary } from "@/lib/closing";
+import { dayStatusOf, type DayStatus } from "@/lib/day-status";
 import { MOVEMENT_KINDS, movementKindOf, type MovementKind } from "@/lib/expense-buckets";
 import { convert, parseRate, usdEquivalent, zeroPair, type Pair } from "@/lib/money";
+import { statusSummaryIn } from "./day-status";
 import { UserError } from "./operations";
 
 export const REPORT_ROLES: Role[] = ["owner", "accountant"];
@@ -115,6 +117,8 @@ export type DailyRow = {
   locationId: string;
   locationName: string;
   status: "open" | "closed";
+  /** The shared status (lib/day-status.ts): open, closed balanced or closed flagged. */
+  dayStatus: DayStatus;
   rate: bigint;
   sales: SalesBlock;
   salesEq: SalesEq;
@@ -130,12 +134,15 @@ export type DailyRow = {
     withinTolerance: boolean;
     reason: VarianceReason | null;
     note: string | null;
+    noSalesReason: string | null;
     closedByName: string | null;
     closedAt: Date;
   } | null;
   adjustments: Pair;
   adjustmentsEq: bigint;
-  /** Difference after corrections; null while the day is open. */
+  /** Difference after corrections, per currency; null while the day is open. */
+  varianceAfter: Pair | null;
+  /** The same at the day's rate, for reporting; null while the day is open. */
   varianceAfterEq: bigint | null;
 };
 
@@ -289,6 +296,7 @@ export async function computePeriodReport(db: DB, scope: TenantScope, filter: Re
         locationId: r.day.locationId,
         locationName: r.locationName,
         status: r.day.status,
+        dayStatus: dayStatusOf(r.day, c),
         rate,
         sales,
         salesEq: salesEq(sales, rate),
@@ -305,12 +313,14 @@ export async function computePeriodReport(db: DB, scope: TenantScope, filter: Re
               withinTolerance: c.withinTolerance,
               reason: c.varianceReason,
               note: c.note,
+              noSalesReason: c.noSalesReason,
               closedByName: r.closedByName,
               closedAt: c.closedAt,
             }
           : null,
         adjustments: adj,
         adjustmentsEq: adjEq,
+        varianceAfter: c ? { USD: c.varianceUsd + adj.USD, LBP: c.varianceLbp + adj.LBP } : null,
         varianceAfterEq: c ? c.varianceEquivCents + adjEq : null,
       };
     });
@@ -364,7 +374,11 @@ export async function computePeriodReport(db: DB, scope: TenantScope, filter: Re
     let shortEq = 0n;
     let overEq = 0n;
     let adjustmentsEq = 0n;
+    const variance = zeroPair();
+    const varianceAfter = zeroPair();
     for (const d of closed) {
+      addPair(variance, d.closing!.variance);
+      addPair(varianceAfter, d.varianceAfter!);
       const v = d.closing!.varianceEq;
       if (v < 0n) shortEq += v;
       else overEq += v;
@@ -387,8 +401,8 @@ export async function computePeriodReport(db: DB, scope: TenantScope, filter: Re
         locationId: l.id,
         name: l.name,
         days: ds.length,
-        closedDays: ds.filter((d) => d.closing).length,
-        flaggedDays: ds.filter((d) => d.closing && !d.closing.withinTolerance).length,
+        closedDays: ds.filter((d) => d.dayStatus !== "open").length,
+        flaggedDays: ds.filter((d) => d.dayStatus === "closed_flagged").length,
         collectedEq,
         expensesEq: expEq,
         cashResultEq: collectedEq - expEq,
@@ -397,10 +411,17 @@ export async function computePeriodReport(db: DB, scope: TenantScope, filter: Re
     });
 
     const rates = [...new Set(daily.map((d) => d.rate))].sort((a, b) => (a < b ? -1 : a > b ? 1 : 0));
+    // The same status query Today and Cash Closing use, so the counts always agree.
+    const status = await statusSummaryIn(tx, f);
 
     return {
       filter: f,
-      org: { id: org.id, name: org.name, toleranceCents: org.varianceToleranceCents, costDataVerified: org.costDataVerified },
+      org: {
+        id: org.id,
+        name: org.name,
+        tolerance: { USD: org.toleranceUsdCents, LBP: org.toleranceLbp } as Pair,
+        costDataVerified: org.costDataVerified,
+      },
       location: location ? { id: location.id, name: location.name } : null,
       locations: locs.map((l) => ({ id: l.id, name: l.name })),
       daily,
@@ -419,11 +440,16 @@ export async function computePeriodReport(db: DB, scope: TenantScope, filter: Re
       /** Safe drops, partner withdrawals and cash put in: not expenses, kept out of every expense total. */
       movements: movementSummary,
       cash: {
-        days: daily.length,
-        closedDays: closed.length,
-        openDays: daily.filter((d) => !d.closing).map((d) => ({ dayId: d.dayId, date: d.date, locationName: d.locationName })),
-        balancedDays: closed.filter((d) => d.closing!.withinTolerance).length,
-        flaggedDays: closed.filter((d) => !d.closing!.withinTolerance).length,
+        /** Records, closed, balanced, flagged and open: the shared counts (spec 15). */
+        status,
+        days: status.records,
+        closedDays: status.closed,
+        openDays: daily.filter((d) => d.dayStatus === "open").map((d) => ({ dayId: d.dayId, date: d.date, locationName: d.locationName })),
+        balancedDays: status.balanced,
+        flaggedDays: status.flagged,
+        /** Differences at closing and after corrections, per currency (never combined). */
+        variance,
+        varianceAfter,
         shortEq,
         overEq,
         netVarianceEq,
@@ -452,10 +478,10 @@ export function dailyTotals(r: PeriodReport) {
   for (const d of r.daily) {
     const t = byDate.get(d.date)!;
     t.collectedEq += d.salesEq.collected;
-    if (d.closing) {
+    if (d.dayStatus !== "open") {
       t.closed++;
       t.varianceAfterEq += d.varianceAfterEq ?? 0n;
-      if (!d.closing.withinTolerance) t.flagged++;
+      if (d.dayStatus === "closed_flagged") t.flagged++;
     } else t.open++;
   }
   for (const e of r.expenses) if (e.status === "active") byDate.get(e.date)!.expensesEq += e.eq;

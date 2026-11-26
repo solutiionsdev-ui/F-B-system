@@ -4,8 +4,10 @@
 import { and, asc, eq, isNull } from "drizzle-orm";
 import { type DB, type TenantScope, withTenant } from "@/db/database";
 import { invitations, posImports, locations } from "@/db/schema";
-import { formatAmount, parseRate } from "@/lib/money";
+import { withinAllowance } from "@/lib/closing";
+import { formatAmount, parseRate, type Pair } from "@/lib/money";
 import type { IconName } from "@/components/icons";
+import { getStatusSummary } from "./day-status";
 import { getDashboard, todayIn } from "./operations";
 import { getImport } from "./pos-import";
 import { computePeriodReport, dailyTotals, shiftDate } from "./reports";
@@ -59,6 +61,13 @@ const dayLabel = (iso: string) =>
 const usd = (cents: bigint) => formatAmount(cents, "USD");
 const abs = (v: bigint) => (v < 0n ? -v : v);
 
+/** "$20.00 · LBP 45,000", leaving out a currency with no difference. */
+function pairText(p: Pair) {
+  const parts = [p.USD !== 0n ? formatAmount(abs(p.USD), "USD") : null, p.LBP !== 0n ? formatAmount(abs(p.LBP), "LBP") : null];
+  return parts.filter(Boolean).join(" · ") || formatAmount(0n, "USD");
+}
+const anyShort = (p: Pair) => p.USD < 0n || p.LBP < 0n;
+
 function pctChange(cur: bigint, prev: bigint): number | null {
   if (prev === 0n) return null;
   return (Number(cur - prev) / Math.abs(Number(prev))) * 100;
@@ -69,17 +78,21 @@ export function greeting(now = new Date()) {
   return hour < 12 ? "Good morning" : hour < 18 ? "Good afternoon" : "Good evening";
 }
 
-export async function getToday(db: DB, scope: TenantScope) {
-  const today = todayIn();
+export async function getToday(db: DB, scope: TenantScope, today = todayIn()) {
   const from = shiftDate(today, -13);
   const weekStart = shiftDate(today, -6);
+  const monthStart = `${today.slice(0, 8)}01`;
   const dash = await getDashboard(db, scope, today);
   const report = await computePeriodReport(db, scope, { from, to: today });
+  // Month to date, through the same status query Reports and Cash Closing use.
+  const status = await getStatusSummary(db, scope, { from: monthStart, to: today });
   const days = dailyTotals(report);
   const byDate = new Map(days.map((d) => [d.date, d]));
   const ops = scope.role === "owner" || scope.role === "manager";
   const books = scope.role === "owner" || scope.role === "accountant";
-  const tol = dash.org.varianceToleranceCents;
+  const tol: Pair = { USD: dash.org.toleranceUsdCents, LBP: dash.org.toleranceLbp };
+  /** A closed day whose difference is still outside the allowance after corrections. */
+  const unresolved = (d: (typeof report.daily)[number]) => d.varianceAfter != null && !withinAllowance(d.varianceAfter, tol);
 
   const extras = await withTenant(db, scope, async (tx) => {
     const drafts = ops
@@ -109,10 +122,9 @@ export async function getToday(db: DB, scope: TenantScope) {
     for (let d = from; d <= today; d = shiftDate(d, 1)) {
       const row = report.daily.find((r) => r.locationId === loc.id && r.date === d);
       let state: HealthState = "none";
-      if (row?.closing) {
-        const v = row.varianceAfterEq ?? 0n;
-        state = abs(v) <= tol ? "balanced" : v < 0n ? "short" : "over";
-      } else if (row) state = "open";
+      if (row?.dayStatus === "closed_balanced") state = "balanced";
+      else if (row?.dayStatus === "closed_flagged") state = anyShort(row.closing!.variance) ? "short" : "over";
+      else if (row) state = "open";
       ticks.push({ date: d, state, varianceEq: row?.varianceAfterEq ?? null, dayId: row?.dayId ?? null });
     }
     health[loc.id] = ticks;
@@ -121,17 +133,24 @@ export async function getToday(db: DB, scope: TenantScope) {
   // ---- headline figures
   const t = byDate.get(today)!;
   const lastWeek = byDate.get(shiftDate(today, -7))!;
-  const week = days.filter((d) => d.date >= weekStart);
-  const weekFlagged = report.daily.filter(
-    (d) => d.date >= weekStart && d.closing && !d.closing.withinTolerance && abs(d.varianceAfterEq ?? 0n) > tol,
-  );
+  const weekDays = report.daily.filter((d) => d.date >= weekStart);
+  const weekClosed = weekDays.filter((d) => d.dayStatus !== "open");
+  // Flagged days still waiting for an explanation or correction: what "Needs you" lists.
+  const weekFlagged = weekDays.filter((d) => d.dayStatus === "closed_flagged" && unresolved(d));
+  const weekDifference: Pair = { USD: 0n, LBP: 0n };
+  for (const d of weekClosed) {
+    weekDifference.USD += d.varianceAfter!.USD;
+    weekDifference.LBP += d.varianceAfter!.LBP;
+  }
   const kpis = {
     collected: { value: t.collectedEq, delta: pctChange(t.collectedEq, lastWeek.collectedEq), spark: days.map((d) => Number(d.collectedEq)) },
     expenses: { value: t.expensesEq, delta: pctChange(t.expensesEq, lastWeek.expensesEq), spark: days.map((d) => Number(d.expensesEq)) },
     difference: {
-      value: week.reduce((s, d) => s + d.varianceAfterEq, 0n),
-      closed: week.reduce((n, d) => n + d.closed, 0),
-      flagged: weekFlagged.length,
+      /** After corrections, per currency: never combined into one number. */
+      value: weekDifference,
+      closed: weekClosed.length,
+      /** Same count as Reports for the same 7 days. */
+      flagged: weekDays.filter((d) => d.dayStatus === "closed_flagged").length,
     },
     compareLabel: `vs ${dayLabel(shiftDate(today, -7))}`,
   };
@@ -139,11 +158,13 @@ export async function getToday(db: DB, scope: TenantScope) {
   // ---- insights: patterns worth a sentence, most useful first, at most two
   const insights: Insight[] = [];
   for (const loc of dash.locations) {
-    const short = report.daily.filter(
-      (d) => d.locationId === loc.id && d.closing && (d.varianceAfterEq ?? 0n) < -tol,
-    );
+    const short = report.daily.filter((d) => d.locationId === loc.id && unresolved(d) && anyShort(d.varianceAfter!));
     if (short.length < 2) continue;
-    const total = short.reduce((s, d) => s + (d.varianceAfterEq ?? 0n), 0n);
+    const total: Pair = { USD: 0n, LBP: 0n };
+    for (const d of short) {
+      total.USD += d.varianceAfter!.USD < 0n ? d.varianceAfter!.USD : 0n;
+      total.LBP += d.varianceAfter!.LBP < 0n ? d.varianceAfter!.LBP : 0n;
+    }
     const reasons = new Map<string, number>();
     for (const d of short) if (d.closing!.reason) reasons.set(d.closing!.reason, (reasons.get(d.closing!.reason) ?? 0) + 1);
     const top = [...reasons.entries()].sort((a, b) => b[1] - a[1])[0];
@@ -153,7 +174,7 @@ export async function getToday(db: DB, scope: TenantScope) {
       tone: "bad",
       icon: "alert",
       lead: `${loc.name} came up short ${short.length} times in the last 14 days.`,
-      text: `${usd(abs(total))} missing in total${top ? `; most often "${REASONS[top[0]]}"` : ""}. Worth a word with whoever closes there.`,
+      text: `${pairText(total)} missing in total${top ? `; most often "${REASONS[top[0]]}"` : ""}. Worth a word with whoever closes there.`,
       action: books
         ? { label: "See those days", href: `/reports?from=${from}&to=${today}&location=${loc.id}` }
         : { label: "Review the latest", href: `/days/${latest.dayId}` },
@@ -194,14 +215,13 @@ export async function getToday(db: DB, scope: TenantScope) {
       });
     }
   }
-  const closedWeek = lastDays.filter((d) => d.closing);
-  if (!insights.some((i) => i.tone === "bad") && closedWeek.length >= 5 && weekFlagged.length === 0) {
+  if (!insights.some((i) => i.tone === "bad") && weekClosed.length >= 5 && kpis.difference.flagged === 0) {
     insights.push({
       key: "balanced",
       tone: "good",
       icon: "check",
       lead: "Every drawer balanced this week.",
-      text: `${closedWeek.length} days closed, all within ±${usd(tol)} after corrections.`,
+      text: `${weekClosed.length} days closed, none flagged.`,
     });
   }
 
@@ -241,12 +261,12 @@ export async function getToday(db: DB, scope: TenantScope) {
   }
   if (books) {
     for (const d of weekFlagged) {
-      const v = d.varianceAfterEq!;
+      const v = d.varianceAfter!;
       items.push({
         key: `flag-${d.dayId}`,
         group: "needs",
         tone: "bad",
-        pill: `${v < 0n ? "Short" : "Over"} ${usd(abs(v))}`,
+        pill: `${anyShort(v) ? "Short" : "Over"} ${pairText(v)}`,
         title: `${d.locationName} · ${dayLabel(d.date)} didn't balance`,
         detail: `${d.closing!.reason ? REASONS[d.closing!.reason] : "No reason given"}. Post a correction on the day if it's explained.`,
         href: `/days/${d.dayId}`,
@@ -325,6 +345,7 @@ export async function getToday(db: DB, scope: TenantScope) {
   return {
     today,
     dash,
+    status,
     kpis,
     health,
     insights: insights.slice(0, 2),

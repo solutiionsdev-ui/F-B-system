@@ -5,7 +5,7 @@ import { type DB, type TenantScope, withTenant } from "@/db/database";
 import { businessDays, invitations, locations, memberships, organizations, users, type Role } from "@/db/schema";
 import { hashPassword, verifyPassword } from "@/lib/password";
 import { hashToken, newToken } from "@/lib/tokens";
-import { MoneyError, parseAmount } from "@/lib/money";
+import { MoneyError, parseOptionalAmount } from "@/lib/money";
 import { UserError } from "./operations";
 
 /** Plan allowances from the business plan's pricing table. */
@@ -76,7 +76,12 @@ export async function getTeam(db: DB, scope: TenantScope) {
     const limits = PLAN_LIMITS[org.plan];
     const now = Date.now();
     return {
-      org: { id: org.id, name: org.name, plan: org.plan, toleranceCents: org.varianceToleranceCents },
+      org: {
+        id: org.id,
+        name: org.name,
+        plan: org.plan,
+        tolerance: { USD: org.toleranceUsdCents, LBP: org.toleranceLbp },
+      },
       limits,
       usage: { locations: locs.length, users: members.length + invites.length },
       members: members.map((m) => ({ ...m, isYou: m.userId === scope.userId })),
@@ -221,21 +226,29 @@ export async function removeMember(db: DB, scope: TenantScope, membershipId: str
 
 // ---------------------------------------------------------------- settings
 
-export async function updateSettings(db: DB, scope: TenantScope, input: { name: string; tolerance: string }) {
+export async function updateSettings(
+  db: DB,
+  scope: TenantScope,
+  input: { name: string; toleranceUsd: string; toleranceLbp: string },
+) {
   requireOwner(scope);
   const name = cleanName(input.name, "group name", 80);
-  let toleranceCents: bigint;
-  try {
-    toleranceCents = parseAmount(input.tolerance, "USD");
-  } catch (e) {
-    if (e instanceof MoneyError) throw new UserError(`Cash tolerance: ${e.message}`);
-    throw e;
-  }
-  if (toleranceCents > 10_000n) throw new UserError("Keep the cash tolerance at $100 or less.");
+  const allowance = (raw: string, currency: "USD" | "LBP") => {
+    try {
+      return parseOptionalAmount(raw, currency);
+    } catch (e) {
+      if (e instanceof MoneyError) throw new UserError(`${currency} rounding allowance: ${e.message}`);
+      throw e;
+    }
+  };
+  const toleranceUsdCents = allowance(input.toleranceUsd, "USD");
+  const toleranceLbp = allowance(input.toleranceLbp, "LBP");
+  if (toleranceUsdCents > 10_000n) throw new UserError("Keep the USD rounding allowance at $100 or less.");
+  if (toleranceLbp > 10_000_000n) throw new UserError("Keep the LBP rounding allowance at LBP 10,000,000 or less.");
   return withTenant(db, scope, async (tx) => {
     await tx
       .update(organizations)
-      .set({ name, varianceToleranceCents: toleranceCents })
+      .set({ name, toleranceUsdCents, toleranceLbp })
       .where(eq(organizations.id, scope.orgId));
   });
 }

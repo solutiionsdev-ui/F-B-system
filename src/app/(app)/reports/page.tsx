@@ -11,7 +11,7 @@ import {
   PAID_FROM_LABELS,
   REASON_LABELS,
 } from "@/components/ui";
-import { formatRate, type Pair } from "@/lib/money";
+import { formatAmount, formatRate, type Pair } from "@/lib/money";
 import { requireContext } from "@/server/auth";
 import { getDb } from "@/server/db";
 import { todayIn, UserError } from "@/server/operations";
@@ -140,9 +140,14 @@ export default async function ReportsPage({ searchParams }: { searchParams: Prom
         />
         <Kpi
           label="Cash difference"
-          value={<Money minor={c.netAfterAdjustmentsEq} currency="USD" signed variance />}
-          chip={c.flaggedDays ? <Badge tone="bad">{c.flaggedDays} flagged</Badge> : <Badge tone="good">Balanced</Badge>}
-          sub={`${c.closedDays} closed days, after corrections`}
+          value={
+            <span className="block space-y-1">
+              <Money minor={c.varianceAfter.USD} currency="USD" signed variance className="block" />
+              <Money minor={c.varianceAfter.LBP} currency="LBP" signed variance className="block text-lg" />
+            </span>
+          }
+          chip={c.status.flagged ? <Badge tone="bad">{c.status.flagged} flagged</Badge> : <Badge tone="good">None flagged</Badge>}
+          sub={`${c.status.closed} closed days · after corrections · each currency on its own`}
         />
       </div>
       <p className="mb-8 text-xs text-stone-500">
@@ -179,7 +184,6 @@ export default async function ReportsPage({ searchParams }: { searchParams: Prom
         </Card>
         <Card title="Cash difference by day" description="After corrections. Hover a day for details; the daily table below has every figure.">
           <CashCalendar
-            toleranceCents={Number(report.org.toleranceCents)}
             days={dailyTotals(report).map((d) => ({
               date: d.date,
               varianceAfterEq: Number(d.varianceAfterEq),
@@ -197,20 +201,43 @@ export default async function ReportsPage({ searchParams }: { searchParams: Prom
       </div>
 
       <div className="mb-6 grid items-start gap-6 lg:grid-cols-2">
-        <Card title="Cash control" description={`A day is flagged when expected and counted cash differ by more than $${(Number(report.org.toleranceCents) / 100).toFixed(2)}.`}>
+        <Card
+          title="Cash control"
+          description={
+            report.org.tolerance.USD === 0n && report.org.tolerance.LBP === 0n
+              ? "Each currency is checked on its own. A day is flagged when either drawer is off at all."
+              : `Each currency is checked on its own. A day is flagged when the USD drawer is off by more than ${formatAmount(report.org.tolerance.USD, "USD")} or the LBP drawer by more than ${formatAmount(report.org.tolerance.LBP, "LBP")}.`
+          }
+        >
           <dl className="space-y-1.5 text-sm">
-            <Row label="Closed and locked" value={`${c.closedDays} of ${c.days} days`} />
-            <Row label="Balanced" value={String(c.balancedDays)} />
-            <Row label="Flagged" value={<span className={c.flaggedDays ? "font-medium text-red-700" : ""}>{c.flaggedDays}</span>} />
-            <Row label="Shortages" value={<Money minor={c.shortEq} currency="USD" signed variance />} />
-            <Row label="Overages" value={<Money minor={c.overEq} currency="USD" signed variance />} />
-            <Row label="Corrections after closing" value={<Money minor={c.adjustmentsEq} currency="USD" signed />} />
-            <div className="border-t border-stone-200 pt-1.5">
-              <Row
-                label={<span className="font-semibold text-stone-900">Net difference after corrections</span>}
-                value={<Money minor={c.netAfterAdjustmentsEq} currency="USD" signed variance className="font-semibold" />}
-              />
-            </div>
+            <Row label="Business days" value={String(c.status.records)} />
+            <Row label="Closed and locked" value={String(c.status.closed)} />
+            <Row label="Balanced" value={String(c.status.balanced)} />
+            <Row label="Flagged" value={<span className={c.status.flagged ? "font-medium text-red-700" : ""}>{c.status.flagged}</span>} />
+            <Row label="Open" value={<span className={c.status.open ? "font-medium text-amber-700" : ""}>{c.status.open}</span>} />
+            <Row
+              label="Difference at closing"
+              value={
+                <span className="text-right">
+                  <Money minor={c.variance.USD} currency="USD" signed variance /> ·{" "}
+                  <Money minor={c.variance.LBP} currency="LBP" signed variance />
+                </span>
+              }
+            />
+            <Row
+              label="Difference after corrections"
+              value={
+                <span className="text-right">
+                  <Money minor={c.varianceAfter.USD} currency="USD" signed variance /> ·{" "}
+                  <Money minor={c.varianceAfter.LBP} currency="LBP" signed variance />
+                </span>
+              }
+            />
+            <div className="border-t border-stone-200 pt-1.5 text-xs text-stone-500">In USD at each day&apos;s rate, for reference only:</div>
+            <Row label="Shortages ≈" value={<Money minor={c.shortEq} currency="USD" signed variance />} />
+            <Row label="Overages ≈" value={<Money minor={c.overEq} currency="USD" signed variance />} />
+            <Row label="Corrections after closing ≈" value={<Money minor={c.adjustmentsEq} currency="USD" signed />} />
+            <Row label="Net after corrections ≈" value={<Money minor={c.netAfterAdjustmentsEq} currency="USD" signed variance />} />
           </dl>
           {c.reasons.length > 0 && (
             <div className="mt-4 flex flex-wrap gap-2">
@@ -301,12 +328,12 @@ export default async function ReportsPage({ searchParams }: { searchParams: Prom
                       {d.varianceAfterEq == null ? <span className="text-stone-400">—</span> : <Money minor={d.varianceAfterEq} currency="USD" signed variance />}
                     </td>
                     <td className="px-5 py-2.5">
-                      {!d.closing ? (
+                      {d.dayStatus === "open" ? (
                         <Badge tone="info">Open</Badge>
-                      ) : d.closing.withinTolerance ? (
+                      ) : d.dayStatus === "closed_balanced" ? (
                         <Badge tone="good">Balanced</Badge>
                       ) : (
-                        <Badge tone="bad">{d.closing.reason ? REASON_LABELS[d.closing.reason] : "Flagged"}</Badge>
+                        <Badge tone="bad">{d.closing?.reason ? `Flagged · ${REASON_LABELS[d.closing.reason]}` : "Flagged"}</Badge>
                       )}
                     </td>
                   </tr>

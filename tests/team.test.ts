@@ -222,12 +222,13 @@ describe("members", () => {
 });
 
 describe("settings", () => {
-  it("updates the group name and cash tolerance", async () => {
-    await updateSettings(database.db, cafeOwner, { name: "Café Group Lebanon", tolerance: "2.50" });
+  it("updates the group name and the per-currency rounding allowances", async () => {
+    await updateSettings(database.db, cafeOwner, { name: "Café Group Lebanon", toleranceUsd: "2.50", toleranceLbp: "50k" });
     const team = await getTeam(database.db, cafeOwner);
     expect(team.org.name).toBe("Café Group Lebanon");
-    expect(team.org.toleranceCents).toBe(250n);
-    await expect(updateSettings(database.db, cafeOwner, { name: "X", tolerance: "500" })).rejects.toThrow(/\$100/);
-    await expect(updateSettings(database.db, cafeManager, { name: "X", tolerance: "1" })).rejects.toThrow(UserError);
+    expect(team.org.tolerance).toEqual({ USD: 250n, LBP: 50_000n });
+    await expect(updateSettings(database.db, cafeOwner, { name: "X", toleranceUsd: "500", toleranceLbp: "0" })).rejects.toThrow(/\$100/);
+    await expect(updateSettings(database.db, cafeOwner, { name: "X", toleranceUsd: "0", toleranceLbp: "20m" })).rejects.toThrow(/LBP/);
+    await expect(updateSettings(database.db, cafeManager, { name: "X", toleranceUsd: "1", toleranceLbp: "0" })).rejects.toThrow(UserError);
   });
 });

@@ -121,14 +121,29 @@ export default async function SettingsPage() {
                 <Field label="Group name">
                   <input name="name" defaultValue={dash.org.name} className={inputClass} required />
                 </Field>
-                <Field label="Cash tolerance (USD)" hint="A closing difference larger than this needs a reason. Covers rounding when change is given in LBP.">
-                  <input
-                    name="tolerance"
-                    inputMode="decimal"
-                    defaultValue={toInputValue(dash.org.varianceToleranceCents, "USD")}
-                    className={`${inputClass} num text-right`}
-                  />
-                </Field>
+                <div className="grid grid-cols-2 gap-3">
+                  <Field label="USD rounding allowance">
+                    <input
+                      name="toleranceUsd"
+                      inputMode="decimal"
+                      defaultValue={toInputValue(dash.org.toleranceUsdCents, "USD")}
+                      className={`${inputClass} num text-right`}
+                    />
+                  </Field>
+                  <Field label="LBP rounding allowance">
+                    <input
+                      name="toleranceLbp"
+                      inputMode="decimal"
+                      defaultValue={toInputValue(dash.org.toleranceLbp, "LBP")}
+                      className={`${inputClass} num text-right`}
+                    />
+                  </Field>
+                </div>
+                <p className="-mt-1 text-xs text-stone-500">
+                  Each drawer is checked on its own. A closed day stays Balanced when each difference is within its allowance, and is
+                  Flagged otherwise. Any difference, however small, still needs a written explanation. 0 means any difference flags the
+                  day.
+                </p>
               </ActionForm>
             ) : (
               <dl className="space-y-2 text-sm">
@@ -137,9 +152,10 @@ export default async function SettingsPage() {
                   <dd className="font-medium text-stone-900">{dash.org.name}</dd>
                 </div>
                 <div className="flex justify-between gap-4">
-                  <dt className="text-stone-500">Cash tolerance</dt>
+                  <dt className="text-stone-500">Rounding allowance</dt>
                   <dd>
-                    ± <Money minor={dash.org.varianceToleranceCents} currency="USD" />
+                    ± <Money minor={dash.org.toleranceUsdCents} currency="USD" /> · ±{" "}
+                    <Money minor={dash.org.toleranceLbp} currency="LBP" />
                   </dd>
                 </div>
               </dl>

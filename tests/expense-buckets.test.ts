@@ -203,7 +203,7 @@ describe("migrating an organisation that has the old categories", () => {
       );
       const idOf = (name: string) => rows.find((r) => r.name === name)!.id;
 
-      expect(await migrate(legacy)).toEqual(["0007_expense_buckets"]);
+      expect(await migrate(legacy)).toEqual(migrations.filter((m) => m.id >= "0007").map((m) => m.id));
 
       const after = await legacy.db
         .select()

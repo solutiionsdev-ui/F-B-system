@@ -337,7 +337,7 @@ export async function renderReportPdf(
   section(
     doc,
     "Cash control",
-    `Expected vs counted cash at closing. A day is flagged when the difference is more than ${usd(r.org.toleranceCents)}.`,
+    `Expected vs counted cash at closing, each currency checked on its own. A day is flagged when the USD drawer is off by more than ${usd(r.org.tolerance.USD)} or the LBP drawer by more than ${money(r.org.tolerance.LBP, "LBP")}. Any difference needs a written explanation.`,
   );
   const c = r.cash;
   table(
@@ -347,19 +347,24 @@ export async function renderReportPdf(
       { header: "Value", width: 200, align: "right" },
     ],
     [
-      { cells: ["Business days in period", String(c.days)] },
-      { cells: ["Closed and locked", String(c.closedDays)] },
-      { cells: ["Balanced (within tolerance)", String(c.balancedDays)] },
-      { cells: ["Flagged", String(c.flaggedDays)], tones: [undefined, c.flaggedDays ? RED : undefined] },
-      { cells: ["Total shortages", usd(c.shortEq, true)], tones: [undefined, varTone(c.shortEq)] },
-      { cells: ["Total overages", usd(c.overEq, true)], tones: [undefined, varTone(c.overEq)] },
-      { cells: ["Net difference at closing", usd(c.netVarianceEq, true)], tones: [undefined, varTone(c.netVarianceEq)] },
-      { cells: ["Corrections posted after closing", usd(c.adjustmentsEq, true)] },
+      { cells: ["Business days in period", String(c.status.records)] },
+      { cells: ["Closed and locked", String(c.status.closed)] },
+      { cells: ["Closed - Balanced", String(c.status.balanced)] },
+      { cells: ["Closed - Flagged", String(c.status.flagged)], tones: [undefined, c.status.flagged ? RED : undefined] },
+      { cells: ["Open", String(c.status.open)], tones: [undefined, c.status.open ? AMBER : undefined] },
+      { cells: ["USD difference at closing", money(c.variance.USD, "USD", true)], tones: [undefined, varTone(c.variance.USD)] },
+      { cells: ["LBP difference at closing", money(c.variance.LBP, "LBP", true)], tones: [undefined, varTone(c.variance.LBP)] },
       {
-        cells: ["Net difference after corrections", usd(c.netAfterAdjustmentsEq, true)],
+        cells: ["USD difference after corrections", money(c.varianceAfter.USD, "USD", true)],
         bold: true,
-        tones: [undefined, varTone(c.netAfterAdjustmentsEq)],
+        tones: [undefined, varTone(c.varianceAfter.USD)],
       },
+      {
+        cells: ["LBP difference after corrections", money(c.varianceAfter.LBP, "LBP", true)],
+        bold: true,
+        tones: [undefined, varTone(c.varianceAfter.LBP)],
+      },
+      { cells: ["Net after corrections, approx. USD at each day's rate", usd(c.netAfterAdjustmentsEq, true)], tones: [MUTED, MUTED] },
     ],
   );
   if (c.reasons.length) {
@@ -376,9 +381,9 @@ export async function renderReportPdf(
       })),
     );
   }
-  const notes = r.daily.filter((d) => d.closing?.note && !d.closing.withinTolerance);
+  const notes = r.daily.filter((d) => d.closing?.note && (d.closing.variance.USD !== 0n || d.closing.variance.LBP !== 0n));
   if (notes.length) {
-    doc.font("Helvetica-Bold").fontSize(7.5).fillColor(INK).text("Notes on flagged days", M, doc.y, { width: W });
+    doc.font("Helvetica-Bold").fontSize(7.5).fillColor(INK).text("Explanations for differences", M, doc.y, { width: W });
     doc.font("Helvetica").fontSize(7.5).fillColor(MUTED);
     for (const d of notes) {
       ensureSpace(doc, 14);
@@ -416,26 +421,28 @@ export async function renderReportPdf(
   }
 
   // ---------------------------------------------------------------- daily detail
-  section(doc, "Daily detail", "One line per business day. ~USD at that day's rate. Difference shown after any corrections.");
+  section(
+    doc,
+    "Daily detail",
+    "One line per business day. Collected and expenses in ~USD at that day's rate. Differences in each currency, after any corrections.",
+  );
   table(
     doc,
     [
       { header: "Date", width: 50 },
-      { header: "Location", width: 62 },
-      { header: "Rate", width: 40, align: "right" },
-      { header: "Collected", width: 58, align: "right" },
-      { header: "Cash USD", width: 52, align: "right" },
-      { header: "Cash LBP", width: 66, align: "right" },
-      { header: "Expenses", width: 52, align: "right" },
-      { header: "Difference", width: 52, align: "right" },
-      { header: "Status", width: 83 },
+      { header: "Location", width: 58 },
+      { header: "Rate", width: 36, align: "right" },
+      { header: "Collected", width: 54, align: "right" },
+      { header: "Cash USD", width: 50, align: "right" },
+      { header: "Cash LBP", width: 58, align: "right" },
+      { header: "Expenses", width: 50, align: "right" },
+      { header: "Diff. USD", width: 46, align: "right" },
+      { header: "Diff. LBP", width: 56, align: "right" },
+      { header: "Status", width: 57 },
     ],
     r.daily.map((d) => {
-      const status = !d.closing
-        ? "Open"
-        : d.closing.withinTolerance
-          ? "Balanced"
-          : REASONS[d.closing.reason ?? "other"] ?? "Flagged";
+      const status = d.dayStatus === "open" ? "Open" : d.dayStatus === "closed_balanced" ? "Balanced" : "Flagged";
+      const v = d.varianceAfter;
       return {
         cells: [
           dateLabel(d.date, false),
@@ -445,7 +452,8 @@ export async function renderReportPdf(
           money(d.sales.byTender.cash.USD, "USD"),
           money(d.sales.byTender.cash.LBP, "LBP").replace("LBP ", ""),
           usd(d.expensesEq),
-          d.varianceAfterEq == null ? "-" : usd(d.varianceAfterEq, true),
+          v == null ? "-" : money(v.USD, "USD", true),
+          v == null ? "-" : money(v.LBP, "LBP", true).replace("LBP ", ""),
           status,
         ],
         tones: [
@@ -456,8 +464,9 @@ export async function renderReportPdf(
           undefined,
           undefined,
           undefined,
-          d.varianceAfterEq == null ? MUTED : varTone(d.varianceAfterEq),
-          !d.closing ? AMBER : d.closing.withinTolerance ? undefined : RED,
+          v == null ? MUTED : varTone(v.USD),
+          v == null ? MUTED : varTone(v.LBP),
+          d.dayStatus === "open" ? AMBER : d.dayStatus === "closed_balanced" ? undefined : RED,
         ],
       };
     }),

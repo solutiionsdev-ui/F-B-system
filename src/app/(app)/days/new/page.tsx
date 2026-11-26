@@ -46,8 +46,9 @@ export default async function NewDayPage({ searchParams }: { searchParams: Promi
               </Field>
             </div>
             <p className="rounded-lg bg-stone-50 px-3 py-2 text-sm text-stone-600">
-              This day will use <span className="num font-medium text-stone-900">{formatRate(parseRate(data.rate.lbpPerUsd))} LBP / $</span>{" "}
-              for all its USD-equivalent figures, even if the rate changes later.
+              A day for today uses <span className="num font-medium text-stone-900">{formatRate(parseRate(data.rate.lbpPerUsd))} LBP / $</span>.
+              A back-dated day uses the rate that was in force on its own date. Either way the day keeps its rate, even if the rate
+              changes later.
             </p>
           </ActionForm>
         )}

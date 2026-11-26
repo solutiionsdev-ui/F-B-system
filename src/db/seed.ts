@@ -229,7 +229,21 @@ async function seedHistory(db: DB, b: SeedBase) {
     if (i <= 4) await simulateDay(db, cafeScope, gemmayzeh.id, cafeCats, { date: addDays(today, -i), close: true }, 200 + i);
   }
   for (let i = 3; i >= 1; i--) {
-    await simulateDay(db, bistroScope, marMikhael.id, bistroCats, { date: addDays(today, -i), close: true, shortBy: i === 2 ? { USD: usd(20), LBP: 0n } : undefined, reason: i === 2 ? "counting_error" : undefined }, 300 + i);
+    const short = i === 2;
+    await simulateDay(
+      db,
+      bistroScope,
+      marMikhael.id,
+      bistroCats,
+      {
+        date: addDays(today, -i),
+        close: true,
+        shortBy: short ? { USD: usd(20), LBP: 0n } : undefined,
+        reason: short ? "counting_error" : undefined,
+        note: short ? "Counted twice at closing and came up $20 short both times." : undefined,
+      },
+      300 + i,
+    );
   }
 
   // The rate moved; newer days use the new rate while older days keep theirs.

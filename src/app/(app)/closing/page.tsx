@@ -24,9 +24,9 @@ function PairLines({ p }: { p: Pair }) {
 }
 
 function Status({ d }: { d: DailyRow }) {
-  if (!d.closing) return <Badge tone="accent">Open</Badge>;
-  if (d.closing.withinTolerance) return <Badge tone="good">Balanced</Badge>;
-  return <Badge tone="bad">{d.closing.reason ? REASON_LABELS[d.closing.reason] : "Flagged"}</Badge>;
+  if (d.dayStatus === "open") return <Badge tone="accent">Open</Badge>;
+  if (d.dayStatus === "closed_balanced") return <Badge tone="good">Balanced</Badge>;
+  return <Badge tone="bad">{d.closing?.reason ? `Flagged · ${REASON_LABELS[d.closing.reason]}` : "Flagged"}</Badge>;
 }
 
 export default async function ClosingPage({ searchParams }: { searchParams: Promise<PeriodSearch> }) {
@@ -123,7 +123,7 @@ export default async function ClosingPage({ searchParams }: { searchParams: Prom
             <div key={day.id} className={cardClass}>
               <div className="flex flex-wrap items-start justify-between gap-x-3 gap-y-1">
                 <h3 className="min-w-0 truncate font-semibold text-stone-900">{location.name}</h3>
-                {day.withinTolerance ? <Badge tone="good">Closed · balanced</Badge> : <Badge tone="bad">Closed · flagged</Badge>}
+                {day.dayStatus === "closed_balanced" ? <Badge tone="good">Closed · balanced</Badge> : <Badge tone="bad">Closed · flagged</Badge>}
               </div>
               <p className="mt-3 flex-1 text-sm text-stone-500">
                 Today is closed. Difference{" "}
@@ -162,17 +162,26 @@ function History({ report }: { report: PeriodReport }) {
   return (
     <>
       <div className="mb-6 grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-        <Kpi label="Days closed" value={<span className="num">{c.closedDays}</span>} sub={`of ${c.days} business day${c.days === 1 ? "" : "s"} in the period`} />
-        <Kpi label="Balanced" value={<span className="num">{c.balancedDays}</span>} sub="Counted within the allowed difference" />
+        <Kpi
+          label="Days closed"
+          value={<span className="num">{c.status.closed}</span>}
+          sub={`of ${c.status.records} business day${c.status.records === 1 ? "" : "s"} · ${c.status.open} open`}
+        />
+        <Kpi label="Balanced" value={<span className="num">{c.status.balanced}</span>} sub="Each currency within its allowance" />
         <Kpi
           label="Flagged"
-          value={<span className={`num ${c.flaggedDays ? "text-red-700" : ""}`}>{c.flaggedDays}</span>}
-          sub="Closed with a difference that needed a reason"
+          value={<span className={`num ${c.status.flagged ? "text-red-700" : ""}`}>{c.status.flagged}</span>}
+          sub="Closed with a difference over the allowance"
         />
         <Kpi
           label="Net difference"
-          value={<Money minor={c.netAfterAdjustmentsEq} currency="USD" signed variance />}
-          sub={c.adjustmentsEq !== 0n ? "After corrections" : "No corrections posted"}
+          value={
+            <span className="block space-y-1">
+              <Money minor={c.varianceAfter.USD} currency="USD" signed variance className="block" />
+              <Money minor={c.varianceAfter.LBP} currency="LBP" signed variance className="block text-lg" />
+            </span>
+          }
+          sub={c.adjustmentsEq !== 0n ? "After corrections, each currency on its own" : "No corrections posted"}
         />
       </div>
 
@@ -205,8 +214,15 @@ function History({ report }: { report: PeriodReport }) {
                     <td className="px-3 py-3 text-right text-stone-700">{d.closing ? <PairLines p={d.closing.expected} /> : <span className="text-stone-300">—</span>}</td>
                     <td className="px-3 py-3 text-right text-stone-700">{d.closing ? <PairLines p={d.closing.counted} /> : <span className="text-stone-300">—</span>}</td>
                     <td className="px-3 py-3 text-right">
-                      {d.varianceAfterEq != null ? (
-                        <Money minor={d.varianceAfterEq} currency="USD" signed variance className="font-medium" />
+                      {d.varianceAfter ? (
+                        <>
+                          <div>
+                            <Money minor={d.varianceAfter.USD} currency="USD" signed variance className="font-medium" />
+                          </div>
+                          <div className="text-xs">
+                            <Money minor={d.varianceAfter.LBP} currency="LBP" signed variance />
+                          </div>
+                        </>
                       ) : (
                         <span className="text-stone-300">—</span>
                       )}

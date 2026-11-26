@@ -28,6 +28,8 @@ import {
   type VarianceReason,
 } from "@/db/schema";
 import { computeExpected, reconcile, salesSummary } from "@/lib/closing";
+import { dayStatusOf } from "@/lib/day-status";
+import { pickRateForDate } from "@/lib/rates";
 import { isMovementKind, movementDirection, type MovementKind } from "@/lib/expense-buckets";
 import { CURRENCIES, countTotal, parseRate, rateToDb, RATE_SCALE, type Pair } from "@/lib/money";
 
@@ -65,6 +67,15 @@ export async function currentRate(tx: Tx, at: Date = new Date()) {
     .orderBy(desc(exchangeRates.effectiveAt), desc(exchangeRates.createdAt))
     .limit(1);
   return rate ?? null;
+}
+
+/**
+ * The rate a business day on `date` snapshots when it's opened: the one in
+ * force at the end of that date in the venue's time zone (see lib/rates.ts).
+ */
+export async function rateForBusinessDate(tx: Tx, date: string, timeZone: string, now = new Date()) {
+  const rates = await tx.select().from(exchangeRates);
+  return pickRateForDate(rates, date, timeZone, now);
 }
 
 export async function setRate(
@@ -122,8 +133,9 @@ export async function openDay(
   return withTenant(db, scope, async (tx) => {
     const [location] = await tx.select().from(locations).where(eq(locations.id, input.locationId));
     if (!location) throw new UserError("Pick a location.");
-    const rate = await currentRate(tx);
-    if (!rate) throw new UserError("Set today's exchange rate before opening a day.");
+    const choice = await rateForBusinessDate(tx, input.businessDate, location.timezone);
+    if (!choice) throw new UserError("Set today's exchange rate before opening a day.");
+    const rate = choice.rate;
     const [existing] = await tx
       .select({ id: businessDays.id })
       .from(businessDays)
@@ -141,7 +153,7 @@ export async function openDay(
         openedBy: scope.userId,
       })
       .returning();
-    return day;
+    return { ...day, rateLbpPerUsd: rate.lbpPerUsd, rateFallback: choice.fallback };
   });
 }
 
@@ -385,7 +397,8 @@ async function computeDay(tx: Tx, day: typeof businessDays.$inferSelect) {
     Record<Currency, (typeof counts)[number]>
   >;
   const counted: Pair = { USD: countByCurrency.USD?.countedMinor ?? 0n, LBP: countByCurrency.LBP?.countedMinor ?? 0n };
-  const recon = reconcile(breakdown.expected, counted, rateScaled, org.varianceToleranceCents);
+  const tolerance: Pair = { USD: org.toleranceUsdCents, LBP: org.toleranceLbp };
+  const recon = reconcile(breakdown.expected, counted, rateScaled, tolerance);
   return {
     org,
     rate,
@@ -395,6 +408,9 @@ async function computeDay(tx: Tx, day: typeof businessDays.$inferSelect) {
     movements,
     counts: countByCurrency,
     countsComplete: Boolean(countByCurrency.USD && countByCurrency.LBP),
+    /** At least one payment (any tender) is recorded for the day. */
+    hasSales: lines.some((l) => l.lineType === "payment"),
+    tolerance,
     breakdown,
     recon,
     sales: salesSummary(lines),
@@ -405,15 +421,25 @@ export async function closeDay(
   db: DB,
   scope: TenantScope,
   dayId: string,
-  input: { reason?: VarianceReason | null; note?: string },
+  input: { reason?: VarianceReason | null; note?: string; noSalesReason?: string },
 ) {
   requireRole(scope, OPS, "close a business day");
   return withTenant(db, scope, async (tx) => {
     const day = await loadOpenDay(tx, dayId);
     const d = await computeDay(tx, day);
     if (!d.countsComplete) throw new UserError("Count both the USD and LBP cash before closing.");
-    if (!d.recon.withinTolerance && !input.reason) {
-      throw new UserError("The drawer doesn't balance. Pick a reason for the difference before closing.");
+    const note = input.note?.trim() ?? "";
+    // Spec 12.5: any difference, in either currency and however small, needs a written explanation.
+    if (d.recon.needsExplanation) {
+      if (!input.reason) throw new UserError("The drawer doesn't balance. Pick a reason for the difference before closing.");
+      if (!note) {
+        throw new UserError("Explain the difference in writing before closing. Any difference in USD or LBP needs an explanation.");
+      }
+    }
+    // Spec 13.2: a day with nothing sold can close only when someone says why.
+    const noSalesReason = input.noSalesReason?.trim() ?? "";
+    if (!d.hasSales && !noSalesReason) {
+      throw new UserError("No sales are recorded for this day. Import the POS file or enter the totals, or say why there were no sales.");
     }
     await tx.insert(dayClosings).values({
       orgId: scope.orgId,
@@ -427,8 +453,11 @@ export async function closeDay(
       varianceLbp: d.recon.variance.LBP,
       varianceEquivCents: d.recon.varianceEquivCents,
       withinTolerance: d.recon.withinTolerance,
-      varianceReason: input.reason ?? null,
-      note: input.note?.trim() || null,
+      varianceReason: d.recon.needsExplanation ? (input.reason ?? null) : null,
+      note: note || null,
+      toleranceUsdCents: d.tolerance.USD,
+      toleranceLbp: d.tolerance.LBP,
+      noSalesReason: d.hasSales ? null : noSalesReason,
       closedBy: scope.userId,
     });
     const closedAt = new Date();
@@ -514,28 +543,37 @@ export function getDashboard(db: DB, scope: TenantScope, today = todayIn()) {
     const [org] = await tx.select().from(organizations).where(eq(organizations.id, scope.orgId));
     const locs = await tx.select().from(locations).orderBy(asc(locations.name));
     const rate = await currentRate(tx);
-    const recent = await tx
-      .select({
-        id: businessDays.id,
-        businessDate: businessDays.businessDate,
-        status: businessDays.status,
-        locationId: businessDays.locationId,
-        locationName: locations.name,
-        varianceEquivCents: dayClosings.varianceEquivCents,
-        withinTolerance: dayClosings.withinTolerance,
-        varianceReason: dayClosings.varianceReason,
-        closedByName: users.name,
-      })
-      .from(businessDays)
-      .innerJoin(locations, eq(locations.id, businessDays.locationId))
-      .leftJoin(dayClosings, eq(dayClosings.businessDayId, businessDays.id))
-      .leftJoin(users, eq(users.id, businessDays.closedBy))
-      .orderBy(desc(businessDays.businessDate), asc(locations.name))
-      .limit(30);
-    const todayByLocation = Object.fromEntries(
-      recent.filter((r) => r.businessDate === today).map((r) => [r.locationId, r]),
+    const dayRow = {
+      id: businessDays.id,
+      businessDate: businessDays.businessDate,
+      status: businessDays.status,
+      locationId: businessDays.locationId,
+      locationName: locations.name,
+      varianceEquivCents: dayClosings.varianceEquivCents,
+      varianceUsd: dayClosings.varianceUsd,
+      varianceLbp: dayClosings.varianceLbp,
+      withinTolerance: dayClosings.withinTolerance,
+      varianceReason: dayClosings.varianceReason,
+      closedByName: users.name,
+    };
+    const base = () =>
+      tx
+        .select(dayRow)
+        .from(businessDays)
+        .innerJoin(locations, eq(locations.id, businessDays.locationId))
+        .leftJoin(dayClosings, eq(dayClosings.businessDayId, businessDays.id))
+        .leftJoin(users, eq(users.id, businessDays.closedBy));
+    const withStatus = <T extends { status: "open" | "closed"; withinTolerance: boolean | null }>(r: T) => ({
+      ...r,
+      dayStatus: dayStatusOf(r, r.withinTolerance == null ? null : { withinTolerance: r.withinTolerance }),
+    });
+    // The recent table is a display list, so it's capped. Open days and today's days are not.
+    const recent = (await base().orderBy(desc(businessDays.businessDate), asc(locations.name)).limit(30)).map(withStatus);
+    const openDays = (await base().where(eq(businessDays.status, "open")).orderBy(asc(businessDays.businessDate), asc(locations.name))).map(
+      withStatus,
     );
-    const openDays = recent.filter((r) => r.status === "open");
+    const todays = (await base().where(eq(businessDays.businessDate, today))).map(withStatus);
+    const todayByLocation = Object.fromEntries(todays.map((r) => [r.locationId, r]));
     return { org, locations: locs, rate, recent, todayByLocation, openDays, today };
   });
 }
