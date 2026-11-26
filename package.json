@@ -14,12 +14,14 @@
     "drizzle-orm": "^0.45.4",
     "lucide-react": "1.71.0",
     "next": "16.4.6",
+    "pdfjs-dist": "6.5.438",
     "pdfkit": "^0.21.0",
     "postgres": "^4.1.1",
     "react": "19.3.0",
     "react-dom": "19.3.0",
     "read-excel-file": "9.3.14",
     "server-only": "^0.0.1",
+    "unpdf": "2.1.0",
     "zod": "^4.6.7"
   },
   "devDependencies": {

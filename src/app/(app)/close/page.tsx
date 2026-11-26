@@ -166,7 +166,7 @@ export default async function DailyClosePage({ searchParams }: { searchParams: P
   const open = d?.day.status === "open";
   const [templates, draft] = await Promise.all([
     open && canRecord ? recentExpenseTemplates(db, ctx.scope, branch.id) : Promise.resolve([]),
-    open && canSales && sp.import && UUID.test(sp.import) ? getImport(db, ctx.scope, sp.import) : Promise.resolve(null),
+    open && canSales && sp.import && UUID.test(sp.import) ? getImport(db, ctx.scope, sp.import, { replaceManual: true }) : Promise.resolve(null),
   ]);
   const myDraft = draft && draft.import.locationId === branch.id && draft.import.status === "draft" ? draft : null;
   const pending = imports.filter((i) => i.status === "draft" && i.id !== myDraft?.import.id);

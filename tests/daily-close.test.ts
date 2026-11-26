@@ -13,6 +13,7 @@ import { findCloseDay, isIsoDate, pickCloseDate, recentExpenseTemplates } from "
 import { addExpense, getAuditTrail, getDay, openDay, setRate, UserError, voidExpense } from "@/server/operations";
 import { createImportDraft, getImport, postImport } from "@/server/pos-import";
 import { getPeriodReport } from "@/server/reports";
+import { omegaSamplePdf } from "./pdf-fixture";
 
 const TODAY = "2026-11-26";
 let database: Database;
@@ -213,5 +214,46 @@ describe("manager access to Performance", () => {
     expect(visibleTabs(granted).map((t) => t.key)).toContain("performance");
     expect((await getPeriodReport(db, granted, { from: "2026-11-15", to: TODAY })).byLocation).toHaveLength(3);
     await db.update(memberships).set({ permissions: m.permissions }).where(eq(memberships.id, m.id));
+  });
+});
+
+describe("Daily Close step 1: importing over typed-in totals", () => {
+  it("replaces the Z-report totals with the Omega file (here a PDF) in one step, once, and audits the removal", async () => {
+    const db = database.db;
+    const taproom = venue["Mar Mikhael Taproom"];
+    const day = (await findCloseDay(db, manager, taproom, TODAY)).day!;
+    const manualBefore = await db.select().from(salesLines).where(and(eq(salesLines.businessDayId, day.id), eq(salesLines.source, "manual")));
+    expect(manualBefore.length).toBeGreaterThan(0); // the demo's typed-in totals
+
+    const pdf = await omegaSamplePdf(TODAY);
+    const id = await createImportDraft(db, manager, { locationId: taproom, fileName: "omega-tonight.pdf", bytes: pdf });
+    // The PDF's columns match the saved Omega format, so it's recognised without guessing.
+    expect((await getImport(db, manager, id))!.import.profileId).not.toBeNull();
+
+    // Elsewhere the typed-in totals block the file; from Daily Close they are replaced.
+    const blocked = (await getImport(db, manager, id))!.preview!;
+    expect(blocked.days[0].blocked).toMatch(/typed in by hand/);
+    expect(blocked.counts.toImport).toBe(0);
+    const p = (await getImport(db, manager, id, { replaceManual: true }))!.preview!;
+    expect(p.days[0]).toMatchObject({ blocked: null, replacesManual: true });
+    expect(p.check.posting).toEqual({ USD: 85650n, LBP: 4_485_000n });
+
+    // Only this day: a file for another date is refused.
+    await expect(postImport(db, manager, id, { createMissingDays: false, replaceManual: true, onlyDate: "2026-11-25" })).rejects.toThrow(/other business dates/);
+
+    await postImport(db, manager, id, { createMissingDays: false, replaceManual: true, onlyDate: TODAY });
+    const after = await db.select().from(salesLines).where(eq(salesLines.businessDayId, day.id));
+    expect(after.every((l) => l.source === "pos_import")).toBe(true);
+    expect(after).toHaveLength(p.counts.toImport);
+    const d = (await getDay(db, manager, day.id))!;
+    expect(d.sales.collected).toEqual({ USD: 85650n, LBP: 4_485_000n }); // counted once, from the file only
+
+    // Every typed-in line removed is in the audit trail, with who removed it.
+    const trail = await getAuditTrail(db, owner, { table: "sales_lines", userId: manager.userId, limit: 500 });
+    const removed = trail.rows.filter((r) => r.op === "DELETE" && (r.oldData as { business_day_id?: string }).business_day_id === day.id);
+    expect(removed).toHaveLength(manualBefore.length);
+
+    // Retrying can't post it again.
+    await expect(postImport(db, manager, id, { createMissingDays: false, replaceManual: true, onlyDate: TODAY })).rejects.toThrow(UserError);
   });
 });

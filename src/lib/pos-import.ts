@@ -39,6 +39,9 @@ export type RowProblem = { row: number; problem: string; values: string[] };
 
 export const MAX_ROWS = 20_000;
 export const MAX_BYTES = 5 * 1024 * 1024;
+/** The file picker's filter: CSV, Excel and PDF exports (Google Sheets download as either, or paste the link). */
+export const EXPORT_ACCEPT =
+  ".csv,.txt,.xlsx,.pdf,text/csv,application/pdf,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
 
 // ---------------------------------------------------------------- CSV
 

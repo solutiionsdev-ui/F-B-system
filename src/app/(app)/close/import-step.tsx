@@ -40,6 +40,7 @@ function Preview({ draft, date, canImport }: { draft: Draft; date: string; canIm
   const apps: Pair = { USD: t.byTender.toters.USD + t.byTender.noknok.USD, LBP: t.byTender.toters.LBP + t.byTender.noknok.LBP };
   const matches = CURRENCIES.every((c) => p.check.file[c] === p.check.posting[c]);
   const stop = !format ? "format" : p.setup.length ? "setup" : wrongDate ? "date" : blocked ? "blocked" : p.counts.toImport === 0 ? "nothing" : null;
+  const replaces = p.days.some((x) => x.replacesManual);
 
   const lines: [string, Pair, boolean?][] = [
     ["Cash (USD)", { USD: t.byTender.cash.USD, LBP: 0n }],
@@ -99,6 +100,12 @@ function Preview({ draft, date, canImport }: { draft: Draft; date: string; canIm
       {stop === "nothing" && (
         <div className="rounded-lg border border-stone-200 bg-stone-50 px-3 py-2.5 text-sm text-stone-700">
           Every row in this file is already imported. There is nothing new to post.
+        </div>
+      )}
+      {replaces && stop === null && (
+        <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2.5 text-sm text-amber-900">
+          This day already has totals typed in from the Z report (shown above). Confirming replaces them with this file, so the sales are
+          counted once. The typed-in lines stay in the audit trail with your name.
         </div>
       )}
       {draft.sameFilePosted.length > 0 && (
@@ -178,9 +185,10 @@ function Preview({ draft, date, canImport }: { draft: Draft; date: string; canIm
           {stop === null ? (
             <ActionForm
               action={confirmCloseImportAction.bind(null, imp.id, date)}
-              submitLabel={`Confirm import · ${p.counts.toImport} line${p.counts.toImport === 1 ? "" : "s"}`}
+              submitLabel={`${replaces ? "Replace typed-in totals and import" : "Confirm import"} · ${p.counts.toImport} line${p.counts.toImport === 1 ? "" : "s"}`}
               pendingLabel="Posting…"
               className="contents"
+              confirmText={replaces ? "Replace the typed-in totals for this day with this file? The removed lines are kept in the audit trail." : undefined}
             >
               <span className="sr-only">Posts the accepted rows onto this business day.</span>
             </ActionForm>
@@ -238,66 +246,86 @@ export function ImportStep({
       id="step-1"
       step={1}
       title="Import Omega sales"
-      description="The Omega daily sales and payment export for this branch and date. Preview it, then confirm."
+      description="The Omega sales and payment export for this branch and date: CSV, Excel, PDF or a Google Sheet. Preview it, then confirm."
       actions={status}
     >
-      {d.hasSales ? (
-        <div className="space-y-3">
-          {imported && (
-            <p className="rounded-lg bg-sky-50 px-3 py-2 text-xs text-sky-900">
-              From{" "}
-              {importIds.map((id, i) => (
-                <span key={id}>
-                  {i > 0 && ", "}
-                  <Link href={`/import/${id}`} className="font-medium underline">
-                    {importIds.length > 1 ? `import ${i + 1}` : "this import"}
-                  </Link>
-                </span>
-              ))}
-              . To correct it, undo the import there while the day is open.
-            </p>
-          )}
-          <SalesSummary d={d} />
-          {manual && open && canImport && (
-            <details className="rounded-lg border border-stone-200 px-3 py-2 text-sm">
-              <summary className="cursor-pointer font-medium text-stone-700">Edit the typed-in totals</summary>
-              <div className="mt-3">
-                <ManualSalesForm d={d} />
+      <div className="space-y-4">
+        {d.hasSales && (
+          <div className="space-y-3">
+            {imported && (
+              <p className="rounded-lg bg-sky-50 px-3 py-2 text-xs text-sky-900">
+                From{" "}
+                {importIds.map((id, i) => (
+                  <span key={id}>
+                    {i > 0 && ", "}
+                    <Link href={`/import/${id}`} className="font-medium underline">
+                      {importIds.length > 1 ? `import ${i + 1}` : "this import"}
+                    </Link>
+                  </span>
+                ))}
+                . To correct it, undo the import there while the day is open.
+              </p>
+            )}
+            <SalesSummary d={d} />
+          </div>
+        )}
+
+        {!open ? (
+          !d.hasSales && <p className="text-sm text-stone-500">No sales were recorded for this day.</p>
+        ) : draft?.preview && draft.import.status === "draft" ? (
+          <div className={d.hasSales ? "border-t border-stone-100 pt-4" : ""}>
+            <Preview draft={draft} date={date} canImport={canImport} />
+          </div>
+        ) : !canImport ? (
+          !d.hasSales && <p className="text-sm text-stone-500">No sales yet. Someone allowed to import POS sales posts them here.</p>
+        ) : (
+          <div className={`space-y-4 ${d.hasSales ? "border-t border-stone-100 pt-4" : ""}`}>
+            {pending.length > 0 && (
+              <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
+                Uploaded but not posted:{" "}
+                {pending.slice(0, 3).map((i, n) => (
+                  <span key={i.id}>
+                    {n > 0 && ", "}
+                    <Link href={`/close?date=${date}&import=${i.id}#step-1`} className="font-medium underline">
+                      {i.fileName}
+                    </Link>
+                  </span>
+                ))}
+                . Open it to preview and confirm, or discard it.
               </div>
-            </details>
-          )}
-        </div>
-      ) : !open ? (
-        <p className="text-sm text-stone-500">No sales were recorded for this day.</p>
-      ) : draft?.preview && draft.import.status === "draft" ? (
-        <Preview draft={draft} date={date} canImport={canImport} />
-      ) : canImport ? (
-        <div className="space-y-4">
-          {pending.length > 0 && (
-            <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
-              Uploaded but not posted:{" "}
-              {pending.slice(0, 3).map((i, n) => (
-                <span key={i.id}>
-                  {n > 0 && ", "}
-                  <Link href={`/close?date=${date}&import=${i.id}#step-1`} className="font-medium underline">
-                    {i.fileName}
-                  </Link>
-                </span>
-              ))}
-              . Open it to preview and confirm, or discard it.
-            </div>
-          )}
-          <Dropzone locationId={d.day.locationId} date={date} />
-          <details className="rounded-lg border border-stone-200 px-3 py-2 text-sm">
-            <summary className="cursor-pointer font-medium text-stone-700">No export tonight? Type the Z-report totals instead</summary>
-            <div className="mt-3">
-              <ManualSalesForm d={d} />
-            </div>
-          </details>
-        </div>
-      ) : (
-        <p className="text-sm text-stone-500">No sales yet. Someone allowed to import POS sales posts them here.</p>
-      )}
+            )}
+            {imported ? (
+              <details className="rounded-lg border border-stone-200 px-3 py-2 text-sm">
+                <summary className="cursor-pointer font-medium text-stone-700">Import another Omega file for this day</summary>
+                <p className="mt-2 text-xs text-stone-500">Rows already imported are recognised and skipped, so the same sale is never counted twice.</p>
+                <div className="mt-3">
+                  <Dropzone locationId={d.day.locationId} date={date} />
+                </div>
+              </details>
+            ) : (
+              <>
+                {manual && (
+                  <div>
+                    <h3 className="text-sm font-semibold text-stone-900">Import the Omega export instead</h3>
+                    <p className="mt-0.5 text-[13px] text-stone-500">
+                      These totals were typed in from the Z report. Importing the export replaces them after you check the preview.
+                    </p>
+                  </div>
+                )}
+                <Dropzone locationId={d.day.locationId} date={date} />
+                <details className="rounded-lg border border-stone-200 px-3 py-2 text-sm">
+                  <summary className="cursor-pointer font-medium text-stone-700">
+                    {manual ? "Edit the typed-in totals instead" : "No export tonight? Type the Z-report totals instead"}
+                  </summary>
+                  <div className="mt-3">
+                    <ManualSalesForm d={d} />
+                  </div>
+                </details>
+              </>
+            )}
+          </div>
+        )}
+      </div>
     </Card>
   );
 }

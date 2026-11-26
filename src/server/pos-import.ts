@@ -15,6 +15,7 @@ import {
 } from "@/db/schema";
 import { TENDERS } from "@/lib/closing";
 import { CURRENCIES, parseRate, usdEquivalent, zeroPair, type Currency, type Pair } from "@/lib/money";
+import { googleSheetCsvUrl, tableFromPdfItems } from "@/lib/pdf-table";
 import { pickRateForDate } from "@/lib/rates";
 import {
   completeMapping,
@@ -43,11 +44,17 @@ export async function readUpload(fileName: string, bytes: Uint8Array): Promise<{
   if (bytes.byteLength > MAX_BYTES) throw new UserError("Files can be up to 5 MB. Export a shorter period.");
   const name = fileName.toLowerCase();
   try {
+    if (name.endsWith(".pdf") || (bytes[0] === 0x25 && bytes[1] === 0x50 && bytes[2] === 0x44 && bytes[3] === 0x46)) {
+      return await readPdf(bytes);
+    }
     if (name.endsWith(".xlsx")) {
       const data = await readSheet(Buffer.from(bytes), { parseNumber: (s: string) => s });
       return toTable(data as unknown[][]);
     }
     if (name.endsWith(".xls")) throw new UserError("Old .xls files aren't supported. Save it as .xlsx or CSV and upload again.");
+    if (name.endsWith(".ods") || name.endsWith(".numbers")) {
+      throw new UserError("Save the sheet as Excel (.xlsx) or CSV and upload that. From Google Sheets: File → Download → Microsoft Excel or CSV, or paste the sheet's link.");
+    }
     let text: string;
     try {
       text = new TextDecoder("utf-8", { fatal: true }).decode(bytes);
@@ -60,6 +67,57 @@ export async function readUpload(fileName: string, bytes: Uint8Array): Promise<{
     if (e instanceof UserError) throw e;
     throw new UserError(`Couldn't read that file: ${e instanceof Error ? e.message : "unknown format"}. Upload a CSV or .xlsx export.`);
   }
+}
+
+/**
+ * A text-based PDF export: the table is rebuilt from where its text sits on
+ * the page (lib/pdf-table.ts). Scans have no text, and summaries (a Z report)
+ * have no table of lines; both are refused with what to do instead.
+ */
+async function readPdf(bytes: Uint8Array): Promise<{ headers: string[]; rows: string[][] }> {
+  const { extractTextItems } = await import("unpdf");
+  // PDF.js may take over the buffer it is given, so it reads a copy.
+  const { items } = await extractTextItems(bytes.slice());
+  const flat = items.flatMap((page, i) => page.map((it) => ({ str: it.str, x: it.x, y: it.y, width: it.width, page: i })));
+  if (!flat.some((i) => i.str.trim() !== "")) {
+    throw new UserError("This PDF has no readable text, so it's probably a scan or a photo. Export the report from Omega as CSV, Excel or a text PDF.");
+  }
+  const table = tableFromPdfItems(flat);
+  if (!table) {
+    throw new UserError(
+      "There's no table of sales lines in this PDF. If it's the Z-report summary, type its totals in instead, or export the detailed sales and payments report.",
+    );
+  }
+  return { headers: table.headers, rows: table.rows };
+}
+
+/**
+ * A Google Sheet given by its link, read as CSV. The sheet must be shared as
+ * "anyone with the link can view" (or published); otherwise Google answers
+ * with a sign-in page and the person is told how to share it or download it.
+ */
+export async function fetchGoogleSheet(link: string): Promise<{ fileName: string; bytes: Uint8Array }> {
+  const url = googleSheetCsvUrl(link);
+  if (!url) throw new UserError("That isn't a Google Sheets link. Copy it from the sheet's Share button, or download the sheet as .xlsx or CSV.");
+  let res: Response;
+  try {
+    res = await fetch(url, { redirect: "follow", signal: AbortSignal.timeout(15_000), headers: { accept: "text/csv" } });
+  } catch {
+    throw new UserError("Google Sheets didn't answer. Try again, or download the sheet as .xlsx or CSV and upload that.");
+  }
+  const type = res.headers.get("content-type") ?? "";
+  if (!res.ok || !type.includes("text/csv")) {
+    throw new UserError(
+      "FINCTRL can't open that sheet. In Google Sheets, press Share and set it to \"Anyone with the link: Viewer\", or download it (File → Download → CSV or Excel) and upload the file.",
+    );
+  }
+  const declared = Number(res.headers.get("content-length") ?? 0);
+  if (declared > MAX_BYTES) throw new UserError("That sheet is over 5 MB. Export a shorter period.");
+  const bytes = new Uint8Array(await res.arrayBuffer());
+  if (bytes.byteLength > MAX_BYTES) throw new UserError("That sheet is over 5 MB. Export a shorter period.");
+  const id = url.match(/\/d\/(?:e\/)?([A-Za-z0-9_-]+)/)?.[1] ?? "sheet";
+  const gid = new URL(url).searchParams.get("gid") ?? "0";
+  return { fileName: `google-sheet-${id.slice(0, 10)}-${gid}.csv`, bytes };
 }
 
 // ---------------------------------------------------------------- preview
@@ -76,6 +134,8 @@ type DayPreview = {
   alreadyImported: number;
   /** Sales already imported into this day from a different file: a sign the day may be imported twice. */
   otherImportLines: number;
+  /** The day has typed-in totals that posting this file will replace (Daily Close only). */
+  replacesManual: boolean;
   /** Payments by type. Only cash goes into a drawer. */
   byTender: Record<Tender, Pair>;
   refunds: Pair;
@@ -89,10 +149,14 @@ type DayPreview = {
 
 const emptyTenders = (): Record<Tender, Pair> => ({ cash: zeroPair(), card: zeroPair(), toters: zeroPair(), noknok: zeroPair(), other: zeroPair() });
 
+/** `replaceManual`: typed-in totals on an open day don't block the file; posting replaces them (Daily Close). */
+export type PreviewOptions = { replaceManual?: boolean };
+
 async function buildPreview(
   tx: Tx,
   imp: { id?: string; locationId: string; headers: string[]; rows: string[][] },
   mapping: Mapping,
+  opts: PreviewOptions = {},
 ) {
   const n = normalizeRows(imp.headers, imp.rows, mapping);
   const dates = [...new Set(n.lines.map((l) => l.businessDate))].sort();
@@ -166,8 +230,8 @@ async function buildPreview(
       dayStatus: d ? d.status : "new",
       blocked: d?.status === "closed"
         ? "This day is already closed. Post an adjustment on the day instead."
-        : d && manualDays.has(d.id)
-          ? "Totals were typed in by hand for this day. Clear them on the day page first, so sales aren't counted twice."
+        : d && manualDays.has(d.id) && !opts.replaceManual
+          ? "Totals were typed in by hand for this day. Import the file from Daily Close to replace them, so sales aren't counted twice."
           : !d && !r
             ? "Set an exchange rate before importing."
             : null,
@@ -176,6 +240,7 @@ async function buildPreview(
       toImport: 0,
       alreadyImported: 0,
       otherImportLines: d ? (otherImports.get(d.id) ?? 0) : 0,
+      replacesManual: Boolean(d && d.status === "open" && manualDays.has(d.id) && opts.replaceManual),
       byTender: emptyTenders(),
       refunds: zeroPair(),
       discounts: zeroPair(),
@@ -370,7 +435,7 @@ export function listProfiles(db: DB, scope: TenantScope) {
 }
 
 /** Everything the import page needs: the file, its mapping, and the preview. */
-export function getImport(db: DB, scope: TenantScope, importId: string) {
+export function getImport(db: DB, scope: TenantScope, importId: string, opts: PreviewOptions = {}) {
   return withTenant(db, scope, async (tx) => {
     const [imp] = await tx.select().from(posImports).where(eq(posImports.id, importId));
     if (!imp) return null;
@@ -391,7 +456,7 @@ export function getImport(db: DB, scope: TenantScope, importId: string) {
       imp.headers,
       imp.rows,
     );
-    const preview = imp.status === "draft" ? await buildPreview(tx, imp, mapping) : null;
+    const preview = imp.status === "draft" ? await buildPreview(tx, imp, mapping, opts) : null;
 
     // For a posted import, what it actually added, per day.
     const posted =
@@ -465,15 +530,25 @@ export async function postImport(
   db: DB,
   scope: TenantScope,
   importId: string,
-  opts: { createMissingDays: boolean; saveAs?: string | null },
+  opts: {
+    createMissingDays: boolean;
+    saveAs?: string | null;
+    /** Replace typed-in totals on the file's open day (Daily Close). The removed lines stay in the audit trail. */
+    replaceManual?: boolean;
+    /** Refuse a file holding any other business date (Daily Close posts one day). */
+    onlyDate?: string;
+  },
 ) {
   requireImporter(scope);
   return withTenant(db, scope, async (tx) => {
     const imp = await loadDraft(tx, importId);
     if (!isMapping(imp.mapping)) throw new UserError("Map the columns first.");
     const mapping = imp.mapping;
-    const preview = await buildPreview(tx, imp, mapping);
+    const preview = await buildPreview(tx, imp, mapping, { replaceManual: opts.replaceManual });
     if (preview.setup.length) throw new UserError(preview.setup[0]);
+    if (opts.onlyDate && preview.days.some((d) => d.date !== opts.onlyDate)) {
+      throw new UserError("This file holds other business dates too. Review it on the full import page instead.");
+    }
 
     const dayIds = new Map<string, string>();
     let daysCreated = 0;
@@ -495,6 +570,10 @@ export async function postImport(
       await lockDay(tx, d.dayId);
       const [now] = await tx.select({ status: businessDays.status }).from(businessDays).where(eq(businessDays.id, d.dayId));
       if (now?.status !== "open") throw new UserError(`${d.date} was closed while you were importing. Refresh and try again.`);
+      // The file replaces the totals typed in for this day, in the same transaction; the audit trail keeps every removed line.
+      if (d.replacesManual) {
+        await tx.delete(salesLines).where(and(eq(salesLines.businessDayId, d.dayId), eq(salesLines.source, "manual")));
+      }
     }
     const lines = preview.postable.filter((l) => dayIds.has(l.businessDate));
     if (lines.length === 0) {

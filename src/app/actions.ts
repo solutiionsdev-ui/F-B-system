@@ -43,6 +43,7 @@ import {
 import {
   applyProfile,
   createImportDraft,
+  fetchGoogleSheet,
   deleteProfile,
   discardImport,
   mappingFromForm,
@@ -435,18 +436,22 @@ export async function acceptInviteAction(token: string, _: ActionState, fd: Form
 
 // ---------------------------------------------------------------- POS import
 
+/** The uploaded file, or the Google Sheet whose link was pasted instead. */
+async function uploadedExport(fd: FormData): Promise<{ fileName: string; bytes: Uint8Array }> {
+  const file = fd.get("file");
+  if (file instanceof File && file.size > 0) return { fileName: file.name, bytes: new Uint8Array(await file.arrayBuffer()) };
+  const link = str(fd, "sheetUrl");
+  if (link) return fetchGoogleSheet(link);
+  throw new UserError("Choose the Omega export (CSV, Excel or PDF), or paste a Google Sheets link.");
+}
+
 export async function uploadImportAction(_: ActionState, fd: FormData): Promise<ActionState> {
   const ctx = await requireContext();
   const db = await getDb();
-  const file = fd.get("file");
-  if (!(file instanceof File) || file.size === 0) return { error: "Choose a CSV or Excel file to upload." };
   let id: string;
   try {
-    id = await createImportDraft(db, ctx.scope, {
-      locationId: str(fd, "locationId"),
-      fileName: file.name,
-      bytes: new Uint8Array(await file.arrayBuffer()),
-    });
+    const upload = await uploadedExport(fd);
+    id = await createImportDraft(db, ctx.scope, { locationId: str(fd, "locationId"), ...upload });
   } catch (e) {
     return { error: toMessage(e) };
   }
@@ -537,16 +542,11 @@ const closeUrl = (date: string, extra = "") => `/close?date=${encodeURIComponent
 export async function uploadForCloseAction(_: ActionState, fd: FormData): Promise<ActionState> {
   const ctx = await requireContext();
   const db = await getDb();
-  const file = fd.get("file");
   const date = str(fd, "date");
-  if (!(file instanceof File) || file.size === 0) return { error: "Choose the Omega CSV or Excel export to upload." };
   let id: string;
   try {
-    id = await createImportDraft(db, ctx.scope, {
-      locationId: str(fd, "locationId"),
-      fileName: file.name,
-      bytes: new Uint8Array(await file.arrayBuffer()),
-    });
+    const upload = await uploadedExport(fd);
+    id = await createImportDraft(db, ctx.scope, { locationId: str(fd, "locationId"), ...upload });
   } catch (e) {
     return { error: toMessage(e) };
   }
@@ -557,15 +557,17 @@ export async function uploadForCloseAction(_: ActionState, fd: FormData): Promis
 /**
  * Step 1: post a previewed draft onto the open day, after the person confirms.
  * Missing days are never opened from here: the day was opened with its float
- * first. Posting twice is refused (the draft is posted once, and rows already
- * imported are skipped by their POS reference).
+ * first. Only a file for this one date is posted. Totals typed in for the day
+ * are replaced in the same transaction (the audit trail keeps them). Posting
+ * twice is refused (the draft is posted once, and rows already imported are
+ * skipped by their POS reference).
  */
 export async function confirmCloseImportAction(importId: string, date: string, _: ActionState, fd: FormData): Promise<ActionState> {
   void fd;
   const ctx = await requireContext();
   const db = await getDb();
   try {
-    await postImport(db, ctx.scope, importId, { createMissingDays: false });
+    await postImport(db, ctx.scope, importId, { createMissingDays: false, replaceManual: true, onlyDate: date });
   } catch (e) {
     return { error: toMessage(e) };
   }

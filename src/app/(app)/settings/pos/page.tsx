@@ -3,6 +3,7 @@ import { deleteProfileAction, uploadImportAction } from "@/app/actions";
 import { ActionForm } from "@/components/action-form";
 import { Icon } from "@/components/icons";
 import { Badge, buttonClass, Card, Field, formatTime, inputClass, SectionTitle } from "@/components/ui";
+import { EXPORT_ACCEPT } from "@/lib/pos-import";
 import { requireContext } from "@/server/auth";
 import { getDb } from "@/server/db";
 import { listImports, listProfiles } from "@/server/pos-import";
@@ -137,14 +138,16 @@ export default async function PosFormatsPage() {
                     ))}
                   </select>
                 </Field>
-                <Field label="File" hint="CSV or .xlsx, up to 5 MB">
+                <Field label="File" hint="CSV, Excel (.xlsx) or PDF, up to 5 MB">
                   <input
                     type="file"
                     name="file"
-                    accept=".csv,.txt,.xlsx,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-                    required
+                    accept={EXPORT_ACCEPT}
                     className="block w-full text-sm text-stone-700 file:mr-3 file:rounded-lg file:border-0 file:bg-stone-100 file:px-3 file:py-2 file:text-sm file:font-medium file:text-stone-800 hover:file:bg-stone-200"
                   />
+                </Field>
+                <Field label="Or a Google Sheets link" hint="Shared as “Anyone with the link can view”. A chosen file is used first.">
+                  <input name="sheetUrl" type="url" placeholder="https://docs.google.com/spreadsheets/d/…" className={inputClass} />
                 </Field>
               </ActionForm>
             </Card>
