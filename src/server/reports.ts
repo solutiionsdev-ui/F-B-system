@@ -141,6 +141,8 @@ export type DailyRow = {
 
 export type ExpenseRow = {
   id: string;
+  /** The business day it was entered on, if any. */
+  dayId: string | null;
   date: string;
   locationId: string;
   locationName: string;
@@ -236,6 +238,7 @@ export async function computePeriodReport(db: DB, scope: TenantScope, filter: Re
       const rate = parseRate(r.rate);
       return {
         id: r.e.id,
+        dayId: r.e.businessDayId,
         date: r.e.expenseDate,
         locationId: r.e.locationId,
         locationName: r.locationName,

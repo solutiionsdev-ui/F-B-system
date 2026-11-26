@@ -7,7 +7,8 @@ import { logoutAction, switchOrgAction } from "@/app/actions";
 import { Icon, type IconName } from "@/components/icons";
 import { Logo } from "@/components/ui";
 
-export type NavLink = { href: string; label: string; icon: IconName; count?: number; attention?: boolean };
+/** `also`: other path prefixes that count as this page (a day page belongs to Cash Closing). */
+export type NavLink = { href: string; label: string; icon: IconName; count?: number; attention?: boolean; also?: string[] };
 export type NavGroup = { label: string; links: NavLink[] };
 
 type Props = {
@@ -18,9 +19,10 @@ type Props = {
   demoUsers: { id: string; name: string }[] | null;
 };
 
-function isActive(pathname: string, href: string) {
-  if (href === "/") return pathname === "/" || pathname.startsWith("/days");
-  return pathname === href || pathname.startsWith(`${href}/`);
+function isActive(pathname: string, link: NavLink) {
+  const under = (p: string) => pathname === p || pathname.startsWith(`${p}/`);
+  if (link.href === "/") return pathname === "/";
+  return under(link.href) || (link.also ?? []).some(under);
 }
 
 function initials(name: string) {
@@ -78,7 +80,7 @@ function SidebarBody({ groups, org, orgs, user, demoUsers, onNavigate }: Props &
             <div className="px-3 pb-1.5 font-mono text-[10.5px] font-medium uppercase tracking-[0.08em] text-stone-400">{g.label}</div>
             <ul className="space-y-0.5">
               {g.links.map((l) => {
-                const active = isActive(pathname, l.href);
+                const active = isActive(pathname, l);
                 return (
                   <li key={l.href}>
                     <Link

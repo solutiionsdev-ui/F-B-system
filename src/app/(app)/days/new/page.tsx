@@ -19,7 +19,7 @@ export default async function NewDayPage({ searchParams }: { searchParams: Promi
         {!data.rate ? (
           <p className="text-sm text-stone-600">
             Set an exchange rate first.{" "}
-            <Link href="/rates" className="font-medium text-brand-700 underline">
+            <Link href="/settings" className="font-medium text-brand-700 underline">
               Set the rate
             </Link>
           </p>

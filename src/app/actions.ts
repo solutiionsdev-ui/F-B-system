@@ -136,7 +136,7 @@ export async function setRateAction(_: ActionState, fd: FormData) {
         source: (str(fd, "source") || "market") as "market" | "bank" | "custom",
         note: str(fd, "note"),
       }),
-    ["/", "/rates"],
+    ["/", "/settings"],
     "New rate saved. Days opened from now on will use it.",
   );
 }
@@ -223,7 +223,7 @@ export async function addExpenseAction(_: ActionState, fd: FormData) {
         paidFrom: paidFromOf(str(fd, "paidFrom")),
       });
     },
-    [`/days/${dayId}`],
+    [`/days/${dayId}`, "/expenses", "/closing"],
     "Expense recorded",
   );
 }
@@ -232,7 +232,7 @@ export async function voidExpenseAction(_: ActionState, fd: FormData) {
   const dayId = str(fd, "dayId");
   return run(
     (ctx, db) => voidExpense(db, ctx.scope, str(fd, "expenseId"), str(fd, "reason")),
-    [`/days/${dayId}`],
+    [`/days/${dayId}`, "/expenses", "/closing"],
     "Expense voided",
   );
 }
@@ -250,14 +250,14 @@ export async function addMovementAction(_: ActionState, fd: FormData) {
         reason: str(fd, "reason"),
       });
     },
-    [`/days/${dayId}`],
+    [`/days/${dayId}`, "/cash", "/closing"],
     "Cash movement recorded",
   );
 }
 
 export async function deleteMovementAction(_: ActionState, fd: FormData) {
   const dayId = str(fd, "dayId");
-  return run((ctx, db) => deleteMovement(db, ctx.scope, str(fd, "movementId")), [`/days/${dayId}`], "Removed");
+  return run((ctx, db) => deleteMovement(db, ctx.scope, str(fd, "movementId")), [`/days/${dayId}`, "/cash", "/closing"], "Removed");
 }
 
 export async function saveCountAction(_: ActionState, fd: FormData) {
@@ -319,13 +319,13 @@ export async function addAdjustmentAction(_: ActionState, fd: FormData) {
 // ---------------------------------------------------------------- team
 
 export async function addLocationAction(_: ActionState, fd: FormData) {
-  return run((ctx, db) => addLocation(db, ctx.scope, str(fd, "name")), ["/team", "/"], "Location added");
+  return run((ctx, db) => addLocation(db, ctx.scope, str(fd, "name")), ["/settings", "/"], "Location added");
 }
 
 export async function renameLocationAction(_: ActionState, fd: FormData) {
   return run(
     (ctx, db) => renameLocation(db, ctx.scope, str(fd, "locationId"), str(fd, "name")),
-    ["/team", "/"],
+    ["/settings", "/"],
     "Renamed",
   );
 }
@@ -377,7 +377,7 @@ export async function removeMemberAction(_: ActionState, fd: FormData) {
 export async function updateSettingsAction(_: ActionState, fd: FormData) {
   return run(
     (ctx, db) => updateSettings(db, ctx.scope, { name: str(fd, "name"), tolerance: str(fd, "tolerance") }),
-    ["/team", "/"],
+    ["/settings", "/"],
     "Settings saved",
   );
 }

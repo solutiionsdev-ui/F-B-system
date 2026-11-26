@@ -126,6 +126,20 @@ export function Field({ label, hint, children, className = "" }: { label: string
   );
 }
 
+/** A headline figure tile: label, big value, optional chip and one line under it. */
+export function Kpi({ label, value, chip, sub }: { label: string; value: ReactNode; chip?: ReactNode; sub?: ReactNode }) {
+  return (
+    <div className="min-w-0 rounded-2xl border border-stone-200/80 bg-white p-4 shadow-[0_1px_2px_rgba(28,25,23,0.04)]">
+      <div className="flex items-start justify-between gap-2">
+        <span className="text-[13px] text-stone-500">{label}</span>
+        {chip}
+      </div>
+      <div className="mt-3 text-[26px] font-semibold leading-none tracking-tight text-stone-900">{value}</div>
+      {sub && <div className="mt-2.5 text-xs text-stone-500">{sub}</div>}
+    </div>
+  );
+}
+
 export function PageTitle({ title, subtitle, actions }: { title: ReactNode; subtitle?: ReactNode; actions?: ReactNode }) {
   return (
     <div className="mb-6 flex flex-wrap items-end justify-between gap-4">

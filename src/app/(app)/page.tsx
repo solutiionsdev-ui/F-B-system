@@ -153,7 +153,7 @@ export default async function TodayPage() {
           }
           sub={`${kpis.difference.closed} days closed, after corrections`}
         />
-        <Link href="/rates" className="group block min-w-0">
+        <Link href="/settings" className="group block min-w-0">
           <StatTile
             label="Exchange rate"
             value={

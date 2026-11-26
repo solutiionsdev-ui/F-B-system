@@ -215,9 +215,9 @@ export async function getToday(db: DB, scope: TenantScope) {
       pill: "Blocking",
       title: "Set today's exchange rate",
       detail: "Business days can't be opened until a rate is set.",
-      href: "/rates",
+      href: "/settings",
       icon: "rate",
-      actions: [{ kind: "link", label: "Set the rate", href: "/rates", primary: true }],
+      actions: [{ kind: "link", label: "Set the rate", href: "/settings", primary: true }],
       rank: 0,
     });
   }

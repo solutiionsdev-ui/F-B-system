@@ -1,7 +1,8 @@
 import { addExpenseAction, voidExpenseAction } from "@/app/actions";
 import { ActionForm } from "@/components/action-form";
-import { Badge, Card, Field, inputClass, labelClass, Money } from "@/components/ui";
-import { CATEGORY_HINTS, PAID_FROM_LABELS, PAYMENT_METHODS } from "@/lib/expense-buckets";
+import { EntryGrid, ExpenseFields } from "@/components/entry-forms";
+import { Badge, Card, Field, inputClass, Money } from "@/components/ui";
+import { PAID_FROM_LABELS } from "@/lib/expense-buckets";
 import { CURRENCIES, formatAmount, usdEquivalent, zeroPair } from "@/lib/money";
 import type { DayData } from "./page";
 
@@ -9,7 +10,6 @@ export function ExpensesCard({ d, canOperate }: { d: DayData; canOperate: boolea
   const active = d.expenses.filter((e) => e.status === "active");
   const total = zeroPair();
   for (const e of active) total[e.currency] += e.amountMinor;
-  const hints = d.categories.filter((c) => CATEGORY_HINTS[c.name]).map((c) => `${c.name}: ${CATEGORY_HINTS[c.name]}`);
 
   return (
     <Card
@@ -106,49 +106,9 @@ export function ExpensesCard({ d, canOperate }: { d: DayData; canOperate: boolea
       {canOperate && (
         <ActionForm action={addExpenseAction} submitLabel="Add expense" resetOnSuccess>
           <input type="hidden" name="dayId" value={d.day.id} />
-          <div className="grid gap-3 sm:grid-cols-6">
-            <Field label="Category" className="sm:col-span-6" hint={hints.join(" ") || undefined}>
-              <select name="categoryId" className={inputClass} required>
-                {d.categories.map((c) => (
-                  <option key={c.id} value={c.id}>
-                    {c.name}
-                  </option>
-                ))}
-              </select>
-            </Field>
-            <Field label="Amount" className="sm:col-span-2">
-              <input name="amount" inputMode="decimal" placeholder="0" className={`${inputClass} num text-right`} required />
-            </Field>
-            <Field label="Currency" className="sm:col-span-1">
-              <select name="currency" defaultValue="LBP" className={inputClass}>
-                <option value="LBP">LBP</option>
-                <option value="USD">USD</option>
-              </select>
-            </Field>
-            <fieldset className="sm:col-span-3">
-              <legend className={labelClass}>Paid with</legend>
-              <div className="grid grid-cols-2 gap-2">
-                {PAYMENT_METHODS.map((m) => (
-                  <label
-                    key={m}
-                    className="flex cursor-pointer items-center justify-center rounded-lg border border-stone-200 bg-white px-3 py-2 text-sm text-stone-700 has-[:checked]:border-brand-600 has-[:checked]:bg-brand-50 has-[:checked]:font-medium has-[:checked]:text-stone-900 has-[:focus-visible]:ring-4 has-[:focus-visible]:ring-brand-500/15"
-                  >
-                    <input type="radio" name="paidFrom" value={m} defaultChecked={m === "drawer"} className="sr-only" />
-                    {PAID_FROM_LABELS[m]}
-                  </label>
-                ))}
-              </div>
-            </fieldset>
-            <Field label="Supplier (optional)" className="sm:col-span-3">
-              <input name="vendor" className={inputClass} />
-            </Field>
-            <Field label="Receipt no. (optional)" className="sm:col-span-3">
-              <input name="receiptRef" className={inputClass} />
-            </Field>
-            <Field label="Notes (optional)" className="sm:col-span-6">
-              <input name="description" placeholder="e.g. Bread delivery, Saturday shift" className={inputClass} />
-            </Field>
-          </div>
+          <EntryGrid>
+            <ExpenseFields categories={d.categories} />
+          </EntryGrid>
         </ActionForm>
       )}
     </Card>

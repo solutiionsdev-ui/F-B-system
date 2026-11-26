@@ -1,13 +1,6 @@
-import {
-  addLocationAction,
-  changeRoleAction,
-  removeMemberAction,
-  renameLocationAction,
-  updateSettingsAction,
-} from "@/app/actions";
+import { changeRoleAction, removeMemberAction } from "@/app/actions";
 import { ActionForm } from "@/components/action-form";
-import { Badge, Card, Field, inlineInputClass, inputClass, PageTitle } from "@/components/ui";
-import { toInputValue } from "@/lib/money";
+import { Badge, Card, inlineInputClass, PageTitle } from "@/components/ui";
 import { ROLE_LABEL, ROLES } from "@/lib/roles";
 import { requireContext } from "@/server/auth";
 import { getDb } from "@/server/db";
@@ -43,9 +36,9 @@ export default async function TeamPage() {
   if (ctx.active.role !== "owner") {
     return (
       <>
-        <PageTitle title="Team" />
+        <PageTitle title="Team & access" />
         <Card>
-          <p className="text-sm text-stone-600">Only owners manage the team, locations and settings.</p>
+          <p className="text-sm text-stone-600">Only owners manage who has access.</p>
         </Card>
       </>
     );
@@ -53,14 +46,12 @@ export default async function TeamPage() {
   const t = await getTeam(await getDb(), ctx.scope);
   const plan = PLAN_LIMITS[t.org.plan];
   const usersFull = t.usage.users >= t.limits.users;
-  const locationsFull = t.usage.locations >= t.limits.locations;
 
   return (
     <>
-      <PageTitle title="Team & locations" subtitle={`${t.org.name} · ${plan.label} plan`} />
+      <PageTitle title="Team & access" subtitle={`Who can open ${t.org.name} and what each person can do · ${plan.label} plan`} />
 
-      <div className="mb-6 flex flex-col gap-4 sm:flex-row">
-        <Meter label="Locations" used={t.usage.locations} limit={t.limits.locations} />
+      <div className="mb-6 flex max-w-md flex-col gap-4 sm:flex-row">
         <Meter label="Users (including pending invites)" used={t.usage.users} limit={t.limits.users} />
       </div>
 
@@ -127,52 +118,14 @@ export default async function TeamPage() {
               </ul>
             </Card>
           )}
+        </div>
 
+        <div className="min-w-0 space-y-6">
           <Card
             title="Invite someone"
             description="Creates a private link to send by WhatsApp or email. Their account is ready as soon as they open it."
           >
             <InviteForm orgName={t.org.name} full={usersFull} />
-          </Card>
-        </div>
-
-        <div className="min-w-0 space-y-6">
-          <Card title="Locations" description="Each location has its own cash drawer and business days.">
-            <ul className="-mx-5 -mt-4 mb-4 divide-y divide-stone-100 border-b border-stone-100">
-              {t.locations.map((l) => (
-                <li key={l.id} className="px-5 py-3">
-                  <ActionForm action={renameLocationAction} submitLabel="Rename" variant="ghost" className="flex items-center gap-2" footerClassName="flex-nowrap">
-                    <input type="hidden" name="locationId" value={l.id} />
-                    <input name="name" defaultValue={l.name} aria-label={`Name of ${l.name}`} className={`${inputClass} py-1.5`} />
-                  </ActionForm>
-                  <div className="mt-1 text-xs text-stone-500">
-                    {l.days} business day{l.days === 1 ? "" : "s"} · added {fmtDate(l.createdAt)}
-                  </div>
-                </li>
-              ))}
-            </ul>
-            {locationsFull ? (
-              <p className="text-sm text-stone-500">
-                The {plan.label} plan includes {t.limits.locations} location{t.limits.locations === 1 ? "" : "s"}. Contact us to upgrade.
-              </p>
-            ) : (
-              <ActionForm action={addLocationAction} submitLabel="Add location" resetOnSuccess className="space-y-3">
-                <Field label="New location">
-                  <input name="name" placeholder="e.g. Badaro" className={inputClass} required />
-                </Field>
-              </ActionForm>
-            )}
-          </Card>
-
-          <Card title="Settings">
-            <ActionForm action={updateSettingsAction} submitLabel="Save settings">
-              <Field label="Group name">
-                <input name="name" defaultValue={t.org.name} className={inputClass} required />
-              </Field>
-              <Field label="Cash tolerance (USD)" hint="A closing difference larger than this needs a reason. Covers rounding when change is given in LBP.">
-                <input name="tolerance" inputMode="decimal" defaultValue={toInputValue(t.org.toleranceCents, "USD")} className={`${inputClass} num text-right`} />
-              </Field>
-            </ActionForm>
           </Card>
         </div>
       </div>

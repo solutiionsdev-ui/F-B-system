@@ -1,7 +1,8 @@
 import { addMovementAction, deleteMovementAction } from "@/app/actions";
 import { ActionForm } from "@/components/action-form";
-import { Card, Field, inputClass, Money } from "@/components/ui";
-import { MOVEMENT_KINDS, MOVEMENT_LABELS, movementKindOf } from "@/lib/expense-buckets";
+import { EntryGrid, MovementFields } from "@/components/entry-forms";
+import { Card, Money } from "@/components/ui";
+import { MOVEMENT_LABELS, movementKindOf } from "@/lib/expense-buckets";
 import type { DayData } from "./page";
 
 export function MovementsCard({ d, canOperate }: { d: DayData; canOperate: boolean }) {
@@ -41,29 +42,9 @@ export function MovementsCard({ d, canOperate }: { d: DayData; canOperate: boole
       {canOperate && (
         <ActionForm action={addMovementAction} submitLabel="Record movement" variant="secondary" resetOnSuccess>
           <input type="hidden" name="dayId" value={d.day.id} />
-          <div className="grid gap-3 sm:grid-cols-6">
-            <Field label="Type" className="sm:col-span-6">
-              <select name="kind" defaultValue="safe_drop" className={inputClass}>
-                {MOVEMENT_KINDS.map((k) => (
-                  <option key={k.kind} value={k.kind}>
-                    {k.label}
-                  </option>
-                ))}
-              </select>
-            </Field>
-            <Field label="Amount" className="sm:col-span-3">
-              <input name="amount" inputMode="decimal" placeholder="0" className={`${inputClass} num text-right`} required />
-            </Field>
-            <Field label="Currency" className="sm:col-span-3">
-              <select name="currency" defaultValue="USD" className={inputClass}>
-                <option value="USD">USD</option>
-                <option value="LBP">LBP</option>
-              </select>
-            </Field>
-            <Field label="Note" hint="Which partner, which bank, or why. Needed for “Other cash taken out”." className="sm:col-span-6">
-              <input name="reason" placeholder="e.g. Deposited at the bank" className={inputClass} />
-            </Field>
-          </div>
+          <EntryGrid>
+            <MovementFields />
+          </EntryGrid>
         </ActionForm>
       )}
     </Card>

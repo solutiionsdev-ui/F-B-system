@@ -4,9 +4,8 @@ import {
   buttonClass,
   Card,
   Delta,
-  Field,
+  Kpi,
   formatDate,
-  inputClass,
   Money,
   PageTitle,
   PAID_FROM_LABELS,
@@ -16,29 +15,17 @@ import { formatRate, type Pair } from "@/lib/money";
 import { requireContext } from "@/server/auth";
 import { getDb } from "@/server/db";
 import { todayIn, UserError } from "@/server/operations";
-import { dailyTotals, getComparison, getPeriodReport, REPORT_ROLES, shiftDate, type PeriodReport } from "@/server/reports";
+import { dailyTotals, getComparison, getPeriodReport, REPORT_ROLES, type PeriodReport } from "@/server/reports";
+import { PeriodFilter, readPeriod, type PeriodSearch } from "@/components/period-filter";
 import { TrendChart } from "@/components/charts/trend-chart";
 import { CashCalendar } from "@/components/charts/cash-calendar";
-
-type Search = { from?: string; to?: string; location?: string };
-
-function presets(today: string) {
-  const monthStart = `${today.slice(0, 8)}01`;
-  const lastEnd = shiftDate(monthStart, -1);
-  return [
-    { label: "This month", from: monthStart, to: today },
-    { label: "Last month", from: `${lastEnd.slice(0, 8)}01`, to: lastEnd },
-    { label: "Last 7 days", from: shiftDate(today, -6), to: today },
-    { label: "Last 30 days", from: shiftDate(today, -29), to: today },
-  ];
-}
 
 function change(cur: bigint, prev: bigint | undefined) {
   if (prev == null || prev === 0n) return null;
   return (Number(cur - prev) / Math.abs(Number(prev))) * 100;
 }
 
-export default async function ReportsPage({ searchParams }: { searchParams: Promise<Search> }) {
+export default async function ReportsPage({ searchParams }: { searchParams: Promise<PeriodSearch> }) {
   const ctx = await requireContext();
   if (!REPORT_ROLES.includes(ctx.active.role)) {
     return (
@@ -53,7 +40,7 @@ export default async function ReportsPage({ searchParams }: { searchParams: Prom
 
   const sp = await searchParams;
   const today = todayIn();
-  const filter = { from: sp.from || `${today.slice(0, 8)}01`, to: sp.to || today, locationId: sp.location || null };
+  const filter = readPeriod(sp, today);
   const db = await getDb();
   let report: PeriodReport;
   let comparison: Awaited<ReturnType<typeof getComparison>> | null;
@@ -113,44 +100,7 @@ export default async function ReportsPage({ searchParams }: { searchParams: Prom
         }
       />
 
-      <form className="mb-6 flex flex-wrap items-end gap-3 rounded-2xl border border-stone-200/80 bg-white p-4 shadow-[0_1px_2px_rgba(28,25,23,0.04)]">
-        <Field label="From">
-          <input type="date" name="from" defaultValue={report.filter.from} className={inputClass} />
-        </Field>
-        <Field label="To">
-          <input type="date" name="to" defaultValue={report.filter.to} className={inputClass} />
-        </Field>
-        {report.locations.length > 1 && (
-          <Field label="Location">
-            <select name="location" defaultValue={report.filter.locationId ?? ""} className={inputClass}>
-              <option value="">All locations</option>
-              {report.locations.map((l) => (
-                <option key={l.id} value={l.id}>
-                  {l.name}
-                </option>
-              ))}
-            </select>
-          </Field>
-        )}
-        <button className={buttonClass("secondary")}>Show</button>
-        <div className="flex flex-wrap gap-0.5 rounded-lg bg-stone-100 p-1 text-[13px] sm:ml-auto">
-          {presets(today).map((p) => {
-            const pq = new URLSearchParams({ from: p.from, to: p.to });
-            if (report.filter.locationId) pq.set("location", report.filter.locationId);
-            const active = p.from === report.filter.from && p.to === report.filter.to;
-            return (
-              <Link
-                key={p.label}
-                href={`/reports?${pq}`}
-                aria-current={active ? "true" : undefined}
-                className={`rounded-md px-2.5 py-1 ${active ? "bg-white font-medium text-stone-900 shadow-[0_1px_2px_rgba(28,25,23,0.08)]" : "text-stone-500 hover:text-stone-900"}`}
-              >
-                {p.label}
-              </Link>
-            );
-          })}
-        </div>
-      </form>
+      <PeriodFilter basePath="/reports" filter={report.filter} locations={report.locations} today={today} />
 
       {c.openDays.length > 0 && (
         <div className="mb-6 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
@@ -367,19 +317,6 @@ export default async function ReportsPage({ searchParams }: { searchParams: Prom
         )}
       </Card>
     </>
-  );
-}
-
-function Kpi({ label, value, chip, sub }: { label: string; value: React.ReactNode; chip?: React.ReactNode; sub?: string | null }) {
-  return (
-    <div className="rounded-2xl border border-stone-200/80 bg-white p-4 shadow-[0_1px_2px_rgba(28,25,23,0.04)]">
-      <div className="flex items-start justify-between gap-2">
-        <span className="text-[13px] text-stone-500">{label}</span>
-        {chip}
-      </div>
-      <div className="mt-3 text-[26px] font-semibold leading-none tracking-tight text-stone-900">{value}</div>
-      {sub && <div className="mt-2.5 text-xs text-stone-500">{sub}</div>}
-    </div>
   );
 }
 

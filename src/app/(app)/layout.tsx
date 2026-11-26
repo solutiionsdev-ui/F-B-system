@@ -20,9 +20,11 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
     {
       label: "Operations",
       links: [
-        { href: "/", label: "Today", icon: "today", count: counts.openDays, attention: true },
-        { href: "/import", label: "POS import", icon: "import", count: ops ? counts.importDrafts : 0 },
-        { href: "/rates", label: "Exchange rate", icon: "rate" },
+        { href: "/", label: "Dashboard", icon: "dashboard" },
+        { href: "/import", label: "POS Import", icon: "import", count: ops ? counts.importDrafts : 0 },
+        { href: "/closing", label: "Cash Closing", icon: "closing", count: counts.openDays, attention: true, also: ["/days"] },
+        { href: "/expenses", label: "Expenses", icon: "expenses" },
+        { href: "/cash", label: "Cash", icon: "cash" },
       ],
     },
   ];
@@ -31,14 +33,15 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
       label: "Finance",
       links: [
         { href: "/reports", label: "Reports", icon: "reports" },
-        { href: "/audit", label: "Audit trail", icon: "audit" },
+        { href: "/audit", label: "Audit Trail", icon: "audit" },
       ],
     });
   }
   const orgLinks: NavGroup["links"] = [];
-  if (role === "owner") orgLinks.push({ href: "/team", label: "Team", icon: "team", count: counts.pendingInvites });
+  if (role === "owner") orgLinks.push({ href: "/team", label: "Team & Access", icon: "team", count: counts.pendingInvites });
+  orgLinks.push({ href: "/settings", label: "Settings", icon: "settings", also: ["/rates"] });
   if (ctx.memberships.length > 1) orgLinks.push({ href: "/clients", label: "All clients", icon: "clients" });
-  if (orgLinks.length) groups.push({ label: "Organisation", links: orgLinks });
+  groups.push({ label: "Organisation", links: orgLinks });
 
   return (
     <ToastProvider>
