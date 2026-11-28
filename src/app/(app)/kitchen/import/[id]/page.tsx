@@ -54,7 +54,7 @@ export default async function RecipeImportPreview({ params }: { params: Promise<
   const showCost = ctx.can("view_food_cost");
   const dishes = d.dishes.filter((x) => x.kind === "dish");
   const preps = d.dishes.filter((x) => x.kind === "prep");
-  const summary = imp.summary as null | { ingredientsAdded: number; pricesAdded: number; recipesAdded: number; recipesUpdated: number; versionsAdded: number; settings: boolean; unitClashes: string[] };
+  const summary = imp.summary as null | { ingredientsAdded: number; pricesAdded: number; ingredientsUpdated?: number; recipesAdded: number; recipesUpdated: number; versionsAdded: number; settings: boolean; unitClashes: string[] };
 
   return (
     <>
@@ -101,7 +101,9 @@ export default async function RecipeImportPreview({ params }: { params: Promise<
         <Card className="mb-6" title="What posting will do">
           <ul className="list-disc space-y-1 pl-5 text-sm text-stone-700">
             <li>
-              Ingredients: {d.diff.ingredients.added} new, {d.diff.ingredients.repriced} with a new price (added to their history), {d.diff.ingredients.unchanged} unchanged.
+              Ingredients: {d.diff.ingredients.added} new, {d.diff.ingredients.repriced} with a new price (added to their history),{" "}
+              {d.diff.ingredients.detailed > 0 && <>{d.diff.ingredients.detailed} with new usable % or weights, </>}
+              {d.diff.ingredients.unchanged} unchanged.
               {d.diff.ingredients.unitClash.length > 0 && <> Measured differently from what&apos;s saved, so left alone: {d.diff.ingredients.unitClash.join(", ")}.</>}
             </li>
             <li>

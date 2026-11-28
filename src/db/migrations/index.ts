@@ -9,6 +9,8 @@ import { migration0008 } from "./0008_closing_rules";
 import { migration0009 } from "./0009_branches_access";
 import { migration0010 } from "./0010_financial_rules";
 import { migration0011 } from "./0011_recipes_food_cost";
+import { migration0012 } from "./0012_day_imports";
+import { migration0013 } from "./0013_cost_alert";
 
 // Append new migrations to the end. Never edit one that has shipped.
 export const migrations: { id: string; sql: string }[] = [
@@ -23,4 +25,6 @@ export const migrations: { id: string; sql: string }[] = [
   { id: "0009_branches_access", sql: migration0009 },
   { id: "0010_financial_rules", sql: migration0010 },
   { id: "0011_recipes_food_cost", sql: migration0011 },
+  { id: "0012_day_imports", sql: migration0012 },
+  { id: "0013_cost_alert", sql: migration0013 },
 ];

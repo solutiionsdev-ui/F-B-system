@@ -548,10 +548,11 @@ export async function updateFoodCostSettings(db: DB, scope: TenantScope, input: 
 
 // ---------------------------------------------------------------- importing a workbook
 
-async function readSheets(fileName: string, bytes: Uint8Array): Promise<Sheet[]> {
+/** An uploaded .xlsx as plain text cells, sheet by sheet (dates as 2026-11-26). Shared by the workbook imports. */
+export async function readSheets(fileName: string, bytes: Uint8Array, what = "costing workbook"): Promise<Sheet[]> {
   if (bytes.byteLength === 0) throw new UserError("That file is empty.");
   if (bytes.byteLength > MAX_BYTES) throw new UserError("Workbooks can be up to 5 MB.");
-  if (!fileName.toLowerCase().endsWith(".xlsx")) throw new UserError("Upload the costing workbook as an Excel file (.xlsx). From Google Sheets: File → Download → Microsoft Excel.");
+  if (!fileName.toLowerCase().endsWith(".xlsx")) throw new UserError(`Upload the ${what} as an Excel file (.xlsx). From Google Sheets: File → Download → Microsoft Excel.`);
   const { default: readXlsxFile } = await import("read-excel-file/node");
   try {
     const sheets = await readXlsxFile(Buffer.from(bytes), { parseNumber: (s: string) => s });
@@ -586,17 +587,43 @@ export async function createRecipeImport(db: DB, scope: TenantScope, input: { fi
 const samePrice = (a: Price | null | undefined, b: { currency: Currency; priceE4: bigint; perMilli: bigint } | undefined) =>
   Boolean(a && b && a.currency === b.currency && BigInt(a.priceE4) === b.priceE4 && BigInt(a.perMilli) === b.perMilli);
 
+/** The details a plan ingredient sets on an ingredient (only those the sheet filled in). */
+function planDetails(i: Plan["ingredients"][number]) {
+  return {
+    ...(i.yieldBp != null ? { yieldBp: i.yieldBp } : {}),
+    ...(i.gramsPerUnitMilli ? { gramsPerUnitMilli: BigInt(i.gramsPerUnitMilli) } : {}),
+    ...(i.gramsPerMlE4 ? { gramsPerMlE4: BigInt(i.gramsPerMlE4) } : {}),
+  };
+}
+
+function detailsDiffer(cur: { yieldBp: number; gramsPerUnitMilli: bigint | null; gramsPerMlE4: bigint | null }, d: ReturnType<typeof planDetails>) {
+  return (
+    (d.yieldBp != null && d.yieldBp !== cur.yieldBp) ||
+    (d.gramsPerUnitMilli != null && d.gramsPerUnitMilli !== cur.gramsPerUnitMilli) ||
+    (d.gramsPerMlE4 != null && d.gramsPerMlE4 !== cur.gramsPerMlE4)
+  );
+}
+
 /** What posting the plan would change, against what's already saved. */
 function diffPlan(plan: Plan, k: Kitchen) {
   const ingByKey = new Map(k.ingRows.map((i) => [keyOf(i.name), i]));
   const recByKey = new Map(k.recRows.map((r) => [keyOf(r.name), r]));
-  const ing = { added: 0, repriced: 0, unchanged: 0, unitClash: [] as string[] };
+  const ing = { added: 0, repriced: 0, detailed: 0, unchanged: 0, unitClash: [] as string[] };
   for (const i of plan.ingredients) {
     const cur = ingByKey.get(i.key);
-    if (!cur) ing.added++;
-    else if (cur.baseUnit !== i.baseUnit) ing.unitClash.push(i.name);
-    else if (i.price && !samePrice(i.price, k.priceOf.get(cur.id))) ing.repriced++;
-    else ing.unchanged++;
+    if (!cur) {
+      ing.added++;
+      continue;
+    }
+    if (cur.baseUnit !== i.baseUnit) {
+      ing.unitClash.push(i.name);
+      continue;
+    }
+    const repriced = Boolean(i.price && !samePrice(i.price, k.priceOf.get(cur.id)));
+    const detailed = detailsDiffer(cur, planDetails(i));
+    if (repriced) ing.repriced++;
+    if (detailed) ing.detailed++;
+    if (!repriced && !detailed) ing.unchanged++;
   }
   const rec = { added: 0, changed: [] as string[], unchanged: 0 };
   const ingName = new Map(k.ingRows.map((i) => [i.id, keyOf(i.name)]));
@@ -682,7 +709,7 @@ export async function postRecipeImport(db: DB, scope: TenantScope, importId: str
     const k = await loadKitchen(tx);
     const ingByKey = new Map(k.ingRows.map((i) => [keyOf(i.name), i]));
     const recByKey = new Map(k.recRows.map((r) => [keyOf(r.name), r]));
-    const summary = { ingredientsAdded: 0, pricesAdded: 0, recipesAdded: 0, recipesUpdated: 0, versionsAdded: 0, unitClashes: [] as string[], settings: false };
+    const summary = { ingredientsAdded: 0, pricesAdded: 0, ingredientsUpdated: 0, recipesAdded: 0, recipesUpdated: 0, versionsAdded: 0, unitClashes: [] as string[], settings: false };
 
     const ingId = new Map<string, string>();
     for (const i of plan.ingredients) {
@@ -690,7 +717,7 @@ export async function postRecipeImport(db: DB, scope: TenantScope, importId: str
       if (!cur) {
         [cur] = await tx
           .insert(ingredients)
-          .values({ orgId: scope.orgId, name: i.name, baseUnit: i.baseUnit, supplier: i.supplier, category: i.category, createdBy: scope.userId })
+          .values({ orgId: scope.orgId, name: i.name, baseUnit: i.baseUnit, supplier: i.supplier, category: i.category, ...planDetails(i), createdBy: scope.userId })
           .returning();
         summary.ingredientsAdded++;
       }
@@ -698,6 +725,10 @@ export async function postRecipeImport(db: DB, scope: TenantScope, importId: str
       if (cur.baseUnit !== i.baseUnit) {
         summary.unitClashes.push(i.name);
         continue;
+      }
+      if (detailsDiffer(cur, planDetails(i))) {
+        await tx.update(ingredients).set({ ...planDetails(i), updatedAt: new Date() }).where(eq(ingredients.id, cur.id));
+        summary.ingredientsUpdated++;
       }
       if (i.price && !samePrice(i.price, k.priceOf.get(cur.id))) {
         await tx.insert(ingredientPrices).values({

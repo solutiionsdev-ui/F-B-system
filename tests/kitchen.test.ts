@@ -19,7 +19,8 @@ import {
   saveRecipe,
   setIngredientPrice,
 } from "@/server/kitchen";
-import { SAMPLE_WORKBOOK, workbookXlsx } from "./workbook-fixture";
+import { writeXlsx } from "@/lib/xlsx-writer";
+import { filledTemplate, SAMPLE_WORKBOOK, workbookXlsx } from "./workbook-fixture";
 
 let database: Database;
 let owner: TenantScope;
@@ -182,5 +183,29 @@ describe("prices and food cost", () => {
     const forManager = await listRecipes(database.db, manager);
     expect(forManager.rows.length).toBeGreaterThan(0); // the kitchen sees the recipes
     expect(forManager.rows.every((r) => r.costMicros === null && r.food === null)).toBe(true); // but not their cost
+  });
+});
+
+describe("importing the filled-in template", () => {
+  it("saves usable %, weights and exact batch sizes, and updates them on a later import", async () => {
+    const db = database.db;
+    const id = await createRecipeImport(db, owner, { fileName: "finctrl-recipes-template.xlsx", bytes: writeXlsx(filledTemplate()) });
+    await postRecipeImport(db, owner, id);
+    const all = await db.select().from(ingredients).where(eq(ingredients.orgId, owner.orgId));
+    expect(all.find((i) => i.name === "Tomato")!.yieldBp).toBe(9000);
+    expect(all.find((i) => i.name === "Egg")!.gramsPerUnitMilli).toBe(60_000n);
+    expect(all.find((i) => i.name.toLowerCase() === "olive oil")!.gramsPerMlE4).toBe(9100n);
+    const sauce = await recipeByName("Garlic sauce");
+    const [v] = await db.select().from(recipeVersions).where(eq(recipeVersions.recipeId, sauce.id));
+    expect(v).toMatchObject({ yieldMilli: 400_000n, yieldUnit: "g", yieldEstimated: false });
+
+    // The tomatoes turn out better: usable 95%.
+    const better = filledTemplate().map((s) => (s.name === "PriceList" ? { ...s, rows: s.rows.map((r) => (r[0] === "Tomato" ? [r[0], r[1], r[2], r[3], 95, r[5], r[6]] : r)) } : s));
+    const again = await createRecipeImport(db, owner, { fileName: "finctrl-recipes-template.xlsx", bytes: writeXlsx(better) });
+    expect((await getRecipeImport(db, owner, again))!.diff.ingredients.detailed).toBe(1);
+    const summary = await postRecipeImport(db, owner, again);
+    expect(summary.ingredientsUpdated).toBe(1);
+    const tomato = (await db.select().from(ingredients).where(eq(ingredients.orgId, owner.orgId))).find((i) => i.name === "Tomato")!;
+    expect(tomato.yieldBp).toBe(9500);
   });
 });

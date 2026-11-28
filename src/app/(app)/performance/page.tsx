@@ -22,6 +22,9 @@ import { PeriodFilter, readPeriod, type PeriodSearch } from "@/components/period
 import { TrendChart } from "@/components/charts/trend-chart";
 import { CashCalendar } from "@/components/charts/cash-calendar";
 import { QuickActions } from "../quick-actions";
+import { getCostAlert } from "@/server/cost-alert";
+import { getFoodCost } from "@/server/kitchen";
+import { CostAlertNotice } from "./cost-alert";
 import { PerformanceHeader } from "./header";
 
 const ICON_TONE: Record<AttentionItem["tone"], string> = {
@@ -95,10 +98,17 @@ export default async function ReportsPage({ searchParams }: { searchParams: Prom
   let report: PeriodReport;
   let comparison: Awaited<ReturnType<typeof getComparison>> | null;
   let needs: AttentionItem[] = [];
+  let costAlert: Awaited<ReturnType<typeof getCostAlert>> | null = null;
+  let foodCost: { overTarget: number; targetBp: number } | null = null;
   try {
     report = await getPeriodReport(db, ctx.scope, filter);
     comparison = await getComparison(db, ctx.scope, filter);
     needs = (await getToday(db, ctx.scope, today, ctx.branch?.id ?? null)).needs;
+    costAlert = await getCostAlert(db, ctx.scope, { today, locationId: report.filter.locationId ?? null });
+    if (costAlert.show && ctx.can("view_food_cost")) {
+      const fc = await getFoodCost(db, ctx.scope);
+      foodCost = { overTarget: fc.counts.overTarget, targetBp: fc.settings.targetBp };
+    }
   } catch (e) {
     if (!(e instanceof UserError)) throw e;
     return (
@@ -124,6 +134,7 @@ export default async function ReportsPage({ searchParams }: { searchParams: Prom
   return (
     <>
       <PerformanceHeader ctx={ctx} />
+      {costAlert && <CostAlertNotice alert={costAlert} foodCost={foodCost} isOwner={ctx.active.role === "owner"} />}
       <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
         <p className="text-sm text-stone-500">
           {formatDate(report.filter.from)} to {formatDate(report.filter.to)} · {report.location?.name ?? "All branches"}

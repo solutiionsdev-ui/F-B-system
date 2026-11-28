@@ -16,6 +16,7 @@ export default async function SettingsLayout({ children }: { children: ReactNode
     { href: "/settings/pos", label: "Omega POS formats", count: ctx.can("import_pos") ? counts.importDrafts : 0 },
     ...(ctx.can("manage_team") ? [{ href: "/settings/team", label: "Team & Permissions", count: counts.pendingInvites }] : []),
     ...(ctx.can("view_audit") ? [{ href: "/settings/audit", label: "Audit Trail" }] : []),
+    ...(ctx.active.role === "owner" ? [{ href: "/settings/history", label: "Past days" }] : []),
     { href: "/settings/rates", label: "Rate history" },
     { href: "/settings/business", label: "Business" },
   ];

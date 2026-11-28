@@ -38,6 +38,8 @@ export const organizations = pgTable("organizations", {
   /** Food cost settings (basis points, 10000 = 100%). menuVatBp null: menu prices not marked as VAT-inclusive. */
   foodCostTargetBp: integer("food_cost_target_bp").notNull().default(3000),
   overheadBp: integer("overhead_bp").notNull().default(0),
+  /** Cost alert threshold: how much bigger the cost share of sales must get (500 = 5%). */
+  costAlertBp: integer("cost_alert_bp").notNull().default(500),
   menuVatBp: integer("menu_vat_bp"),
   createdAt: ts("created_at").notNull().defaultNow(),
 });
@@ -389,6 +391,20 @@ export const recipeLines = pgTable("recipe_lines", {
 });
 
 export const recipeImports = pgTable("recipe_imports", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  orgId: uuid("org_id").notNull(),
+  fileName: text("file_name").notNull(),
+  fileHash: text("file_hash").notNull(),
+  plan: jsonb("plan").notNull(),
+  status: text("status").$type<"draft" | "posted" | "discarded">().notNull().default("draft"),
+  summary: jsonb("summary"),
+  createdBy: uuid("created_by"),
+  createdAt: ts("created_at").notNull().defaultNow(),
+  postedBy: uuid("posted_by"),
+  postedAt: ts("posted_at"),
+});
+
+export const dayImports = pgTable("day_imports", {
   id: uuid("id").primaryKey().defaultRandom(),
   orgId: uuid("org_id").notNull(),
   fileName: text("file_name").notNull(),

@@ -16,7 +16,7 @@ import {
 import { cleanOverrides, resolvePermissions } from "@/lib/permissions";
 import { hashPassword, verifyPassword } from "@/lib/password";
 import { hashToken, newToken } from "@/lib/tokens";
-import { MoneyError, parseOptionalAmount } from "@/lib/money";
+import { MoneyError, parseDecimal, parseOptionalAmount } from "@/lib/money";
 import { UserError } from "./operations";
 
 /** Plan allowances from the business plan's pricing table. */
@@ -368,7 +368,7 @@ export async function setMemberAccess(
 export async function updateSettings(
   db: DB,
   scope: TenantScope,
-  input: { name: string; toleranceUsd: string; toleranceLbp: string },
+  input: { name: string; toleranceUsd: string; toleranceLbp: string; costAlert?: string },
 ) {
   requireOwner(scope);
   const name = cleanName(input.name, "group name", 80);
@@ -384,10 +384,22 @@ export async function updateSettings(
   const toleranceLbp = allowance(input.toleranceLbp, "LBP");
   if (toleranceUsdCents > 10_000n) throw new UserError("Keep the USD rounding allowance at $100 or less.");
   if (toleranceLbp > 10_000_000n) throw new UserError("Keep the LBP rounding allowance at LBP 10,000,000 or less.");
+  // The cost alert on Performance: a percentage, 1 to 50 (left out: unchanged).
+  let costAlertBp: number | undefined;
+  if (input.costAlert !== undefined) {
+    let bp: bigint;
+    try {
+      bp = parseDecimal(input.costAlert.replace(/%/g, "").trim() || "5", 2, "cost alert");
+    } catch {
+      throw new UserError("Cost alert: enter a percentage such as 5 or 7.5.");
+    }
+    if (bp < 100n || bp > 5_000n) throw new UserError("Cost alert: pick between 1% and 50%.");
+    costAlertBp = Number(bp);
+  }
   return withTenant(db, scope, async (tx) => {
     await tx
       .update(organizations)
-      .set({ name, toleranceUsdCents, toleranceLbp })
+      .set({ name, toleranceUsdCents, toleranceLbp, ...(costAlertBp !== undefined && { costAlertBp }) })
       .where(eq(organizations.id, scope.orgId));
   });
 }

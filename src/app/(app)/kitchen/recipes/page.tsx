@@ -42,9 +42,9 @@ export default async function RecipesPage() {
             {canEdit ? (
               <>
                 <Link href="/kitchen/import" className="font-medium underline">
-                  Import your costing workbook
+                  Import them from Excel
                 </Link>{" "}
-                (price list, recipes and menu costs) or add recipes one by one.
+                (download the template there, or use your own costing workbook), or add recipes one by one.
               </>
             ) : (
               "Someone allowed to edit recipes adds them."

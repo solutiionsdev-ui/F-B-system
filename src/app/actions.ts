@@ -40,6 +40,7 @@ import {
   revokeInvite,
   updateSettings,
 } from "@/server/team";
+import { createDayImport, discardDayImport, postDayImport } from "@/server/history";
 import {
   createRecipeImport,
   discardRecipeImport,
@@ -424,6 +425,7 @@ export async function updateSettingsAction(_: ActionState, fd: FormData) {
         name: str(fd, "name"),
         toleranceUsd: str(fd, "toleranceUsd"),
         toleranceLbp: str(fd, "toleranceLbp"),
+        costAlert: fd.has("costAlert") ? str(fd, "costAlert") : undefined,
       }),
     ["/settings", "/"],
     "Settings saved",
@@ -724,4 +726,45 @@ export async function updateFoodCostSettingsAction(_: ActionState, fd: FormData)
     [],
     "Food cost settings saved",
   );
+}
+
+// ---------------------------------------------------------------- past days from Excel
+
+export async function uploadDayImportAction(_: ActionState, fd: FormData): Promise<ActionState> {
+  const ctx = await requireContext();
+  const db = await getDb();
+  const file = fd.get("file");
+  if (!(file instanceof File) || file.size === 0) return { error: "Choose the past-days workbook (.xlsx)." };
+  let id: string;
+  try {
+    id = await createDayImport(db, ctx.scope, { fileName: file.name, bytes: new Uint8Array(await file.arrayBuffer()) });
+  } catch (e) {
+    return { error: toMessage(e) };
+  }
+  revalidatePath("/", "layout");
+  redirect(`/settings/history/${id}`);
+}
+
+export async function postDayImportAction(importId: string): Promise<ActionState> {
+  const ctx = await requireContext();
+  const db = await getDb();
+  try {
+    await postDayImport(db, ctx.scope, importId);
+  } catch (e) {
+    return { error: toMessage(e) };
+  }
+  revalidatePath("/", "layout");
+  redirect(`/settings/history/${importId}`);
+}
+
+export async function discardDayImportAction(importId: string): Promise<ActionState> {
+  const ctx = await requireContext();
+  const db = await getDb();
+  try {
+    await discardDayImport(db, ctx.scope, importId);
+  } catch (e) {
+    return { error: toMessage(e) };
+  }
+  revalidatePath("/", "layout");
+  redirect("/settings/history");
 }

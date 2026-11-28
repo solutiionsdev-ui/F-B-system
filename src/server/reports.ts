@@ -439,6 +439,7 @@ export async function computePeriodReport(db: DB, scope: TenantScope, filter: Re
         name: org.name,
         tolerance: { USD: org.toleranceUsdCents, LBP: org.toleranceLbp } as Pair,
         costDataVerified: org.costDataVerified,
+        costAlertBp: org.costAlertBp,
       },
       location: location ? { id: location.id, name: location.name } : null,
       locations: locs.map((l) => ({ id: l.id, name: l.name })),

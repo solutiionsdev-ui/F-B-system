@@ -1,7 +1,8 @@
 import Link from "next/link";
 import { uploadRecipeWorkbookAction } from "@/app/actions";
 import { ActionForm } from "@/components/action-form";
-import { Badge, Card, Field, formatTime } from "@/components/ui";
+import { Icon } from "@/components/icons";
+import { Badge, buttonClass, Card, Field, formatTime } from "@/components/ui";
 import { requireContext } from "@/server/auth";
 import { getDb } from "@/server/db";
 import { listRecipeImports } from "@/server/kitchen";
@@ -34,7 +35,19 @@ export default async function RecipeImportPage() {
         }
       />
       <div className="grid items-start gap-6 lg:grid-cols-[minmax(0,1fr)_360px]">
-        <Card title="Upload">
+        <Card
+          title="Upload"
+          actions={
+            <a href="/kitchen/import/template" download className={buttonClass("secondary")}>
+              <Icon name="file" size={16} /> Download the Excel template
+            </a>
+          }
+        >
+          <p className="mb-4 rounded-lg bg-stone-50 px-3 py-2 text-[13px] text-stone-600">
+            New to this? Download the template: it has the three sheets with an example dish and sauce filled in, and a sheet explaining each
+            column. Fill in your own rows (example rows are skipped), save it, and upload it here. An existing costing workbook in the same
+            layout works too.
+          </p>
           {canEdit ? (
             <ActionForm action={uploadRecipeWorkbookAction} submitLabel="Read and preview" pendingLabel="Reading the workbook…">
               <Field label="Workbook (.xlsx)" hint="From Google Sheets: File → Download → Microsoft Excel. Up to 5 MB.">

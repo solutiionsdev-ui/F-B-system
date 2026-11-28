@@ -4,6 +4,7 @@
 // missing price, a name used for both a dish and an ingredient, blank lines).
 import { strToU8, zipSync } from "fflate";
 import type { Sheet } from "@/lib/menu-workbook";
+import { recipeTemplate } from "@/lib/recipe-template";
 
 export const SAMPLE_WORKBOOK: Sheet[] = [
   {
@@ -94,4 +95,11 @@ export function workbookXlsx(sheets: Sheet[]): Uint8Array {
   };
   sheets.forEach((s, i) => (files[`xl/worksheets/sheet${i + 1}.xml`] = strToU8(sheetXml(s.rows))));
   return zipSync(files);
+}
+
+/** The template as a restaurant would fill it: same rows, without the "Example – " prefix. */
+export function filledTemplate() {
+  return recipeTemplate().map((s) =>
+    s.name === "How to fill" ? s : { ...s, rows: s.rows.map((r) => r.map((c) => (typeof c === "string" ? c.replace(/^Example – /, "") : c))) },
+  );
 }

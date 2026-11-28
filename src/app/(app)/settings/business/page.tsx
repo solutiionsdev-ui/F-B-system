@@ -2,7 +2,7 @@ import { addLocationAction, setLocationStatusAction, updateLocationAction, updat
 import { ActionForm } from "@/components/action-form";
 import { Badge, Card, Field, inputClass, Money, SectionTitle } from "@/components/ui";
 import { CATEGORY_HINTS } from "@/lib/expense-buckets";
-import { toInputValue } from "@/lib/money";
+import { formatScaled, toInputValue } from "@/lib/money";
 import { requireContext } from "@/server/auth";
 import { getDb } from "@/server/db";
 import { getEntryOptions } from "@/server/ledgers";
@@ -70,6 +70,17 @@ export default async function SettingsPage() {
                   Flagged otherwise. Any difference, however small, still needs a written explanation. 0 means any difference flags the
                   day.
                 </p>
+                <Field
+                  label="Cost alert (%)"
+                  hint="Performance shows a red alert when running costs (all expenses: salaries, food, electricity, rent and the rest) take this much more of sales than in the 30 days before. 5 means a share of 60% rising to 63%."
+                >
+                  <input
+                    name="costAlert"
+                    inputMode="decimal"
+                    defaultValue={formatScaled(BigInt(dash.org.costAlertBp), 2)}
+                    className={`${inputClass} num w-28 text-right`}
+                  />
+                </Field>
               </ActionForm>
             ) : (
               <dl className="space-y-2 text-sm">

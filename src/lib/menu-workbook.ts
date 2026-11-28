@@ -23,6 +23,10 @@ export type PlanIngredient = {
   price: Price | null;
   supplier: string | null;
   category: string | null;
+  /** From the optional columns: usable share (bp), weight of one piece (g ×1000), weight of 1 ml (g ×10^4). */
+  yieldBp: number | null;
+  gramsPerUnitMilli: string | null;
+  gramsPerMlE4: string | null;
   row: number;
 };
 
@@ -117,8 +121,19 @@ function columns(header: string[], wanted: Record<string, RegExp>) {
 }
 const cell = (row: string[], i: number) => (i >= 0 ? (row[i] ?? "").toString() : "");
 
+/** Template rows that show how to fill the sheet; never imported. */
+export const isExampleName = (s: string) => /^example\b/i.test(s.trim());
+
+/** "70", "70%" or a percentage cell (0.7) as basis points. */
+function percentBp(raw: string): number | null {
+  const e4 = decimalToScaled(raw.replace("%", ""), 4);
+  if (e4 == null) return null;
+  return e4 <= 10_000n ? Number(e4) : Number(decimalToScaled(raw.replace("%", ""), 2));
+}
+
 export function readWorkbook(sheets: Sheet[]): Plan {
   const issues: Issue[] = [];
+  let exampleRows = 0;
   const issue = (level: IssueLevel, sheet: string, row: number | null, subject: string, message: string) =>
     issues.push({ level, sheet, row, subject, message });
 
@@ -133,11 +148,18 @@ export function readWorkbook(sheets: Sheet[]): Plan {
   const ph = priceSheet.rows[0] ?? [];
   const pc = columns(ph, { name: /ingredient|item|name/i, unit: /unit/i, price: /price/i, notes: /note|supplier/i });
   if (pc.name < 0 || pc.unit < 0 || pc.price < 0) throw new Error(`The ${priceSheet.name} sheet needs Ingredient, Pricing Unit and Price columns.`);
+  // Optional columns (the FINCTRL template has them; older sheets may not).
+  const used = new Set(Object.values(pc));
+  const po = columns(ph.map((h, i) => (used.has(i) ? "" : h)), { usable: /usable|yield/i, piece: /piece/i, ml: /\bml\b|density/i });
   const priced = new Map<string, PlanIngredient>();
   priceSheet.rows.slice(1).forEach((r, i) => {
     const row = i + 2;
     const name = cleanName(cell(r, pc.name));
     if (!name) return;
+    if (isExampleName(name)) {
+      exampleRows++;
+      return;
+    }
     const key = name.toLowerCase();
     const unitRaw = cell(r, pc.unit);
     const unit = parsePricingUnit(unitRaw);
@@ -151,7 +173,25 @@ export function readWorkbook(sheets: Sheet[]): Plan {
     if (!price && priceE4 == null) issue("warning", priceSheet.name, row, name, "No price. Dishes using it can't be fully costed until it has one.");
     if (priced.has(key)) issue("warning", priceSheet.name, row, name, `Listed twice (also row ${priced.get(key)!.row}); this row is used.`);
     const supplier = cleanName(cell(r, pc.notes)) || null;
-    priced.set(key, { key, name, baseUnit: unit.baseUnit, price, supplier, category: null, row });
+    let yieldBp = percentBp(cell(r, po.usable));
+    if (yieldBp != null && (yieldBp < 100 || yieldBp > 10000)) {
+      issue("warning", priceSheet.name, row, name, "Usable % must be between 1 and 100; ignored.");
+      yieldBp = null;
+    }
+    const piece = decimalToScaled(cell(r, po.piece), 3);
+    const ml = decimalToScaled(cell(r, po.ml), 4);
+    priced.set(key, {
+      key,
+      name,
+      baseUnit: unit.baseUnit,
+      price,
+      supplier,
+      category: null,
+      yieldBp,
+      gramsPerUnitMilli: piece != null && piece > 0n ? piece.toString() : null,
+      gramsPerMlE4: ml != null && ml > 0n ? ml.toString() : null,
+      row,
+    });
   });
 
   // ---- recipes: group the lines by dish
@@ -165,6 +205,10 @@ export function readWorkbook(sheets: Sheet[]): Plan {
     const dish = cleanName(cell(r, rc.dish));
     const ingName = cleanName(cell(r, rc.ing));
     if (!dish && !ingName) return;
+    if (isExampleName(dish)) {
+      exampleRows++;
+      return;
+    }
     if (!dish) {
       issue("warning", recipeSheet.name, row, ingName, "Ingredient line with no dish name; skipped.");
       return;
@@ -179,21 +223,36 @@ export function readWorkbook(sheets: Sheet[]): Plan {
   });
 
   // ---- menu costs
-  const menu = new Map<string, { price: bigint | null; packaging: bigint; target: number | null; overhead: number | null; row: number }>();
+  const menu = new Map<
+    string,
+    { price: bigint | null; packaging: bigint; target: number | null; overhead: number | null; batch: bigint | null; batchUnit: string; row: number }
+  >();
   const packaging: { name: string; priceE4: bigint; row: number }[] = [];
   if (menuSheet) {
     const mh = menuSheet.rows[0] ?? [];
-    const mc = columns(mh, { dish: /menu item|dish/i, packaging: /packaging/i, overhead: /overhead/i, target: /target/i, price: /selling/i });
+    const mc = columns(mh, {
+      dish: /menu item|dish/i,
+      packaging: /packaging/i,
+      overhead: /overhead/i,
+      target: /target/i,
+      price: /selling/i,
+      batch: /batch size|batch makes/i,
+      batchUnit: /batch unit/i,
+    });
     menuSheet.rows.slice(1).forEach((r, i) => {
       const row = i + 2;
       const dish = cleanName(cell(r, mc.dish));
-      const bp = (raw: string) => {
-        const v = decimalToScaled(raw, 4);
-        return v == null ? null : Number(v); // 0.3 -> 3000 bp
-      };
+      // 0.3 (a percentage cell) and 30 both mean 30%.
+      const bp = (raw: string) => percentBp(raw);
+      if (dish && isExampleName(dish)) {
+        exampleRows++;
+        return;
+      }
       if (dish) {
         const price = decimalToScaled(cell(r, mc.price), 4);
         menu.set(dish.toLowerCase(), {
+          batch: decimalToScaled(cell(r, mc.batch), 3),
+          batchUnit: cell(r, mc.batchUnit),
           price: price != null && price > 0n ? price : null,
           packaging: decimalToScaled(cell(r, mc.packaging), 4) ?? 0n,
           target: bp(cell(r, mc.target)),
@@ -270,7 +329,7 @@ export function readWorkbook(sheets: Sheet[]): Plan {
       }
       if (!ingredients.has(k)) {
         const base: BaseUnit = unit === "g" || unit === "kg" ? "g" : unit === "unit" ? "unit" : "ml";
-        ingredients.set(k, { key: k, name: l.ing, baseUnit: base, price: null, supplier: null, category: null, row: l.row });
+        ingredients.set(k, { key: k, name: l.ing, baseUnit: base, price: null, supplier: null, category: null, yieldBp: null, gramsPerUnitMilli: null, gramsPerMlE4: null, row: l.row });
         issue("warning", recipeSheet.name, l.row, l.ing, `Not in the price list; added without a price (used in ${d.name}).`);
       }
       lines.push({ ref: { type: "ingredient", key: k }, quantityMilli: qty.toString(), unit, row: l.row });
@@ -280,7 +339,15 @@ export function readWorkbook(sheets: Sheet[]): Plan {
     let yieldMilli: string | null = null;
     let yieldUnit: BaseUnit | null = null;
     let yieldEstimated = false;
-    if (prep) {
+    const givenUnit = m?.batch != null && m.batch > 0n ? parseLineUnit(m.batchUnit) : null;
+    if (prep && m?.batch != null && m.batch > 0n && !givenUnit) {
+      issue("error", menuSheet!.name, m.row, d.name, `Batch unit "${m.batchUnit.trim()}" isn't g, kg, ml, L or unit; the batch size was estimated instead.`);
+    }
+    if (prep && givenUnit && m?.batch) {
+      // The sheet says what one batch makes: use it as it is.
+      yieldUnit = givenUnit === "g" || givenUnit === "kg" ? "g" : givenUnit === "ml" || givenUnit === "l" ? "ml" : "unit";
+      yieldMilli = (m.batch * (givenUnit === "kg" || givenUnit === "l" ? 1000n : 1n)).toString();
+    } else if (prep) {
       // The batch size isn't in the sheet: estimate it from the ingredients, in the unit other recipes use, and flag it.
       const uses = usedAs.get(key) ?? [];
       const dim = (u: LineUnit) => (u === "g" || u === "kg" ? "g" : u === "ml" || u === "l" ? "ml" : "unit");
@@ -360,6 +427,9 @@ export function readWorkbook(sheets: Sheet[]): Plan {
       price: { currency: "USD", priceE4: p.priceE4, perMilli: 1000n, packLabel: "piece" },
       supplier: null,
       category: "Packaging",
+      yieldBp: null,
+      gramsPerUnitMilli: null,
+      gramsPerMlE4: null,
       row: p.row,
     });
   }
@@ -382,6 +452,7 @@ export function readWorkbook(sheets: Sheet[]): Plan {
   const odd = [...menu.entries()].filter(([, m]) => m.overhead != null && overheadBp != null && m.overhead !== overheadBp);
   if (odd.length) issue("warning", menuSheet!.name, odd[0][1].row, "Overhead", `Overhead differs on ${odd.length} dishes; the business-wide ${overheadBp! / 100}% is used.`);
   issue("info", priceSheet.name, null, "Currency", "Prices are read as US dollars.");
+  if (exampleRows) issue("info", priceSheet.name, null, "Examples", `${exampleRows} example row${exampleRows === 1 ? "" : "s"} (names starting with "Example") skipped.`);
 
   return {
     ingredients: [...ingredients.values()],
@@ -407,7 +478,15 @@ export function editDistance(a: string, b: string): number {
 export function planCosts(plan: Plan) {
   const ings = new Map<string, CostIngredient>();
   for (const i of plan.ingredients) {
-    ings.set(`i:${i.key}`, { id: `i:${i.key}`, name: i.name, baseUnit: i.baseUnit, gramsPerMlE4: null, gramsPerUnitMilli: null, yieldBp: 10000, price: i.price && { ...i.price, priceE4: BigInt(i.price.priceE4), perMilli: BigInt(i.price.perMilli) } });
+    ings.set(`i:${i.key}`, {
+      id: `i:${i.key}`,
+      name: i.name,
+      baseUnit: i.baseUnit,
+      gramsPerMlE4: i.gramsPerMlE4 ? BigInt(i.gramsPerMlE4) : null,
+      gramsPerUnitMilli: i.gramsPerUnitMilli ? BigInt(i.gramsPerUnitMilli) : null,
+      yieldBp: i.yieldBp ?? 10000,
+      price: i.price && { ...i.price, priceE4: BigInt(i.price.priceE4), perMilli: BigInt(i.price.perMilli) },
+    });
   }
   const recs = new Map<string, CostRecipe>();
   for (const r of plan.recipes) {
