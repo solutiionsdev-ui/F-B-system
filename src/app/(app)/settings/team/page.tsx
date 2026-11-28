@@ -20,6 +20,8 @@ const SHORT: Record<Permission, string> = {
   export_reports: "downloads",
   view_audit: "audit trail",
   post_corrections: "corrections",
+  manage_recipes: "recipes",
+  view_food_cost: "food cost",
   manage_team: "team",
 };
 

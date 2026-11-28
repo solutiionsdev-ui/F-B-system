@@ -3,6 +3,9 @@
 import {
   ArrowLeftRight,
   Banknote,
+  BookOpen,
+  Boxes,
+  Percent,
   Building2,
   ChartLine,
   Check,
@@ -46,6 +49,9 @@ const icons = {
   close: X,
   check: Check,
   arrow: ChevronRight,
+  recipe: BookOpen,
+  inventory: Boxes,
+  foodCost: Percent,
 } satisfies Record<string, LucideIcon>;
 
 export type IconName = keyof typeof icons;

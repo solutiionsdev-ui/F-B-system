@@ -41,6 +41,16 @@ import {
   updateSettings,
 } from "@/server/team";
 import {
+  createRecipeImport,
+  discardRecipeImport,
+  postRecipeImport,
+  saveIngredient,
+  saveRecipe,
+  setIngredientPrice,
+  setRecipeArchived,
+  updateFoodCostSettings,
+} from "@/server/kitchen";
+import {
   applyProfile,
   createImportDraft,
   fetchGoogleSheet,
@@ -579,4 +589,139 @@ export async function discardCloseImportAction(importId: string, date: string): 
   const res = await discardImportAction(importId);
   if (res.error) return res;
   redirect(closeUrl(date, "#step-1"));
+}
+
+// ---------------------------------------------------------------- Kitchen (stage A)
+
+function recipeLinesFrom(fd: FormData) {
+  const refs = fd.getAll("line_ref").map(String);
+  const qtys = fd.getAll("line_qty").map(String);
+  const units = fd.getAll("line_unit").map(String);
+  return refs.map((ref, i) => ({ ref, quantity: qtys[i] ?? "", unit: units[i] ?? "" }));
+}
+
+export async function saveRecipeAction(_: ActionState, fd: FormData): Promise<ActionState> {
+  const ctx = await requireContext();
+  const db = await getDb();
+  let id: string;
+  try {
+    id = await saveRecipe(db, ctx.scope, {
+      id: str(fd, "id") || undefined,
+      name: str(fd, "name"),
+      kind: str(fd, "kind"),
+      category: str(fd, "category"),
+      sellingPrice: str(fd, "sellingPrice"),
+      priceCurrency: str(fd, "priceCurrency"),
+      packaging: str(fd, "packaging"),
+      targetPct: str(fd, "targetPct"),
+      yieldQty: str(fd, "yieldQty"),
+      yieldUnit: str(fd, "yieldUnit"),
+      note: str(fd, "note"),
+      lines: recipeLinesFrom(fd),
+    });
+  } catch (e) {
+    return { error: toMessage(e) };
+  }
+  revalidatePath("/", "layout");
+  redirect(`/kitchen/recipes/${id}`);
+}
+
+export async function archiveRecipeAction(_: ActionState, fd: FormData) {
+  const archived = str(fd, "archived") === "true";
+  return run((ctx, db) => setRecipeArchived(db, ctx.scope, str(fd, "recipeId"), archived), [], archived ? "Recipe archived" : "Recipe restored");
+}
+
+export async function saveIngredientAction(_: ActionState, fd: FormData): Promise<ActionState> {
+  const ctx = await requireContext();
+  const db = await getDb();
+  const existing = str(fd, "id");
+  let id: string;
+  try {
+    id = await saveIngredient(db, ctx.scope, {
+      id: existing || undefined,
+      name: str(fd, "name"),
+      baseUnit: str(fd, "baseUnit"),
+      gramsPerMl: str(fd, "gramsPerMl"),
+      gramsPerUnit: str(fd, "gramsPerUnit"),
+      yieldPct: str(fd, "yieldPct"),
+      category: str(fd, "category"),
+      supplier: str(fd, "supplier"),
+      note: str(fd, "note"),
+    });
+  } catch (e) {
+    return { error: toMessage(e) };
+  }
+  revalidatePath("/", "layout");
+  if (existing) return { ok: "Ingredient saved", at: Date.now() };
+  redirect(`/kitchen/inventory/${id}`);
+}
+
+export async function setIngredientPriceAction(_: ActionState, fd: FormData) {
+  return run(
+    (ctx, db) =>
+      setIngredientPrice(db, ctx.scope, {
+        ingredientId: str(fd, "ingredientId"),
+        price: str(fd, "price"),
+        currency: str(fd, "currency"),
+        pack: str(fd, "pack"),
+        packSize: str(fd, "packSize"),
+        supplier: str(fd, "supplier"),
+        note: str(fd, "note"),
+      }),
+    [],
+    "New price saved. Every recipe using it is recosted.",
+  );
+}
+
+export async function uploadRecipeWorkbookAction(_: ActionState, fd: FormData): Promise<ActionState> {
+  const ctx = await requireContext();
+  const db = await getDb();
+  const file = fd.get("file");
+  if (!(file instanceof File) || file.size === 0) return { error: "Choose the costing workbook (.xlsx)." };
+  let id: string;
+  try {
+    id = await createRecipeImport(db, ctx.scope, { fileName: file.name, bytes: new Uint8Array(await file.arrayBuffer()) });
+  } catch (e) {
+    return { error: toMessage(e) };
+  }
+  revalidatePath("/", "layout");
+  redirect(`/kitchen/import/${id}`);
+}
+
+export async function postRecipeImportAction(importId: string): Promise<ActionState> {
+  const ctx = await requireContext();
+  const db = await getDb();
+  try {
+    await postRecipeImport(db, ctx.scope, importId);
+  } catch (e) {
+    return { error: toMessage(e) };
+  }
+  revalidatePath("/", "layout");
+  redirect(`/kitchen/import/${importId}`);
+}
+
+export async function discardRecipeImportAction(importId: string): Promise<ActionState> {
+  const ctx = await requireContext();
+  const db = await getDb();
+  try {
+    await discardRecipeImport(db, ctx.scope, importId);
+  } catch (e) {
+    return { error: toMessage(e) };
+  }
+  revalidatePath("/", "layout");
+  redirect("/kitchen/import");
+}
+
+export async function updateFoodCostSettingsAction(_: ActionState, fd: FormData) {
+  return run(
+    (ctx, db) =>
+      updateFoodCostSettings(db, ctx.scope, {
+        target: str(fd, "target"),
+        overhead: str(fd, "overhead"),
+        vat: str(fd, "vat"),
+        vatIncluded: fd.get("vatIncluded") === "on",
+      }),
+    [],
+    "Food cost settings saved",
+  );
 }

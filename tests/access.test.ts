@@ -239,7 +239,7 @@ describe("permission matrix (screen 8)", () => {
   it("gives each role the spec's defaults", () => {
     expect(resolvePermissions("owner", {}).length).toBeGreaterThan(5);
     expect(resolvePermissions("manager", {})).toEqual(["import_pos", "record_transactions", "close_days", "view_audit"]);
-    expect(resolvePermissions("accountant", {})).toEqual(["view_reports", "export_reports", "view_audit"]);
+    expect(resolvePermissions("accountant", {})).toEqual(["view_reports", "export_reports", "view_audit", "view_food_cost"]);
   });
 
   it("ignores overrides the spec doesn't allow", () => {

@@ -26,6 +26,8 @@ export type NavTab = {
 
 type Props = {
   tabs: NavTab[];
+  /** The Kitchen group: recipes, inventory, food cost. */
+  kitchen: NavTab[];
   org: { id: string; name: string; subtitle: string };
   orgs: { id: string; label: string }[];
   /** Venues this person may see; the branch picked applies to every tab. */
@@ -63,7 +65,28 @@ function CountPill({ tab }: { tab: NavTab }) {
   );
 }
 
-function SidebarBody({ tabs, org, orgs, branches, branchId, user, demoUsers, onNavigate }: Props & { onNavigate?: () => void }) {
+function TabLink({ t, pathname, onNavigate }: { t: NavTab; pathname: string; onNavigate?: () => void }) {
+  const active = isActive(pathname, t);
+  return (
+    <Link
+      href={t.href}
+      onClick={onNavigate}
+      aria-current={active ? "page" : undefined}
+      className={`flex items-center gap-3 rounded-xl px-3 py-2.5 transition-colors ${
+        active ? "bg-white shadow-[0_1px_2px_rgba(28,25,23,0.06)] ring-1 ring-stone-200/80" : "hover:bg-stone-200/40"
+      }`}
+    >
+      <Icon name={t.icon} className={active ? "text-stone-900" : "text-stone-400"} />
+      <span className="min-w-0 flex-1">
+        <span className={`block truncate text-[14px] ${active ? "font-semibold text-stone-900" : "font-medium text-stone-700"}`}>{t.label}</span>
+        {t.sub && <span className="block truncate text-[11.5px] text-stone-400">{t.sub}</span>}
+      </span>
+      <CountPill tab={t} />
+    </Link>
+  );
+}
+
+function SidebarBody({ tabs, kitchen, org, orgs, branches, branchId, user, demoUsers, onNavigate }: Props & { onNavigate?: () => void }) {
   const pathname = usePathname();
   return (
     <div className="flex h-full flex-col">
@@ -111,33 +134,26 @@ function SidebarBody({ tabs, org, orgs, branches, branchId, user, demoUsers, onN
         <BranchSelect branches={branches} branchId={branchId} />
       </div>
 
-      <nav className="mt-6 flex-1 overflow-y-auto px-3" aria-label="Main">
+      <nav className="mt-6 flex-1 space-y-5 overflow-y-auto px-3" aria-label="Main">
         <ul className="space-y-1">
-          {tabs.map((t) => {
-            const active = isActive(pathname, t);
-            return (
-              <li key={t.href}>
-                <Link
-                  href={t.href}
-                  onClick={onNavigate}
-                  aria-current={active ? "page" : undefined}
-                  className={`flex items-center gap-3 rounded-xl px-3 py-2.5 transition-colors ${
-                    active
-                      ? "bg-white shadow-[0_1px_2px_rgba(28,25,23,0.06)] ring-1 ring-stone-200/80"
-                      : "hover:bg-stone-200/40"
-                  }`}
-                >
-                  <Icon name={t.icon} className={active ? "text-stone-900" : "text-stone-400"} />
-                  <span className="min-w-0 flex-1">
-                    <span className={`block truncate text-[14px] ${active ? "font-semibold text-stone-900" : "font-medium text-stone-700"}`}>{t.label}</span>
-                    {t.sub && <span className="block truncate text-[11.5px] text-stone-400">{t.sub}</span>}
-                  </span>
-                  <CountPill tab={t} />
-                </Link>
-              </li>
-            );
-          })}
+          {tabs.map((t) => (
+            <li key={t.href}>
+              <TabLink t={t} pathname={pathname} onNavigate={onNavigate} />
+            </li>
+          ))}
         </ul>
+        {kitchen.length > 0 && (
+          <div>
+            <div className="px-3 pb-1.5 font-mono text-[10.5px] font-medium uppercase tracking-[0.08em] text-stone-400">Kitchen</div>
+            <ul className="space-y-1">
+              {kitchen.map((t) => (
+                <li key={t.href}>
+                  <TabLink t={t} pathname={pathname} onNavigate={onNavigate} />
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
       </nav>
 
       <div className="border-t border-stone-200/80 p-3">
@@ -207,15 +223,15 @@ export function Sidebar(props: Props) {
           <Logo size={26} />
           <span className="min-w-0 flex-1 truncate text-sm font-semibold text-stone-900">{props.org.name}</span>
         </div>
-        <nav aria-label="Tabs" className="grid px-2 pb-2" style={{ gridTemplateColumns: `repeat(${props.tabs.length}, minmax(0, 1fr))` }}>
-          {props.tabs.map((t) => {
+        <nav aria-label="Tabs" className="flex gap-1 overflow-x-auto px-2 pb-2 [scrollbar-width:none]">
+          {[...props.tabs, ...props.kitchen].map((t) => {
             const active = isActive(pathname, t);
             return (
               <Link
                 key={t.href}
                 href={t.href}
                 aria-current={active ? "page" : undefined}
-                className={`flex min-w-0 items-center justify-center gap-1.5 rounded-lg px-1.5 py-2 text-[13px] ${
+                className={`flex shrink-0 items-center justify-center gap-1.5 rounded-lg px-2.5 py-2 text-[13px] ${
                   active ? "bg-white font-semibold text-stone-900 shadow-[0_1px_2px_rgba(28,25,23,0.08)] ring-1 ring-stone-200/80" : "text-stone-600"
                 }`}
               >

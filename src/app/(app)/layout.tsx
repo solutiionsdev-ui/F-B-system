@@ -1,6 +1,6 @@
 import type { ReactNode } from "react";
 import { ToastProvider } from "@/components/toast";
-import { visibleTabs } from "@/lib/navigation";
+import { visibleKitchenTabs, visibleTabs } from "@/lib/navigation";
 import { ROLE_LABEL } from "@/lib/roles";
 import { isDemoMode, listDemoUsers, requireContext } from "@/server/auth";
 import { getDb } from "@/server/db";
@@ -27,12 +27,21 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
     settings: { icon: "settings", count: (ctx.can("import_pos") ? counts.importDrafts : 0) + counts.pendingInvites },
   };
   const tabs: NavTab[] = visibleTabs(ctx.scope).map((t) => ({ href: t.href, label: t.label, sub: t.sub, icon: "closing", ...extra[t.key] }));
+  const kitchenIcons = { recipes: "recipe", inventory: "inventory", "food-cost": "foodCost" } as const;
+  const kitchen: NavTab[] = visibleKitchenTabs(ctx.scope).map((t) => ({
+    href: t.href,
+    label: t.label,
+    sub: t.sub,
+    icon: kitchenIcons[t.key as keyof typeof kitchenIcons],
+    also: t.key === "recipes" ? ["/kitchen/import"] : [],
+  }));
 
   return (
     <ToastProvider>
       <div className="flex min-h-screen flex-col lg:flex-row">
         <Sidebar
           tabs={tabs}
+          kitchen={kitchen}
           org={{
             id: ctx.active.orgId,
             name: ctx.active.orgName,

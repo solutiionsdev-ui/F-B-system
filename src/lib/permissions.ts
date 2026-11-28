@@ -18,6 +18,8 @@ export type Permission =
   | "export_reports"
   | "view_audit"
   | "post_corrections"
+  | "manage_recipes"
+  | "view_food_cost"
   | "manage_team";
 
 type Rule = { default: boolean; adjustable: boolean };
@@ -85,6 +87,20 @@ export const PERMISSIONS: {
     hint: "Additive corrections; the closed figures never change.",
     manager: { default: false, adjustable: false },
     accountant: { default: false, adjustable: true },
+  },
+  {
+    key: "manage_recipes",
+    label: "Edit recipes and ingredient prices",
+    hint: "Recipes, ingredients, their prices, and importing a costing workbook.",
+    manager: { default: false, adjustable: true },
+    accountant: { default: false, adjustable: false },
+  },
+  {
+    key: "view_food_cost",
+    label: "See food cost",
+    hint: "Ingredient prices, recipe costs, food cost % and suggested prices.",
+    manager: { default: false, adjustable: true },
+    accountant: { default: true, adjustable: true },
   },
   {
     key: "manage_team",

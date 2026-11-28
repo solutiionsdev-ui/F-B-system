@@ -64,6 +64,21 @@ function parseScaled(input: string, decimals: number, label: string): bigint {
   return digits / divisor;
 }
 
+/** A plain decimal ("1,250.5", "4.5k") as an integer scaled by 10^decimals; for quantities, prices and percentages. */
+export function parseDecimal(input: string, decimals: number, label: string): bigint {
+  return parseScaled(input, decimals, label);
+}
+
+/** "1,250.5" for a value scaled by 10^decimals, trailing zeros dropped. */
+export function formatScaled(value: bigint, decimals: number, minDecimals = 0): string {
+  const negative = value < 0n;
+  const abs = negative ? -value : value;
+  const scale = 10n ** BigInt(decimals);
+  let frac = (abs % scale).toString().padStart(decimals, "0").replace(/0+$/, "");
+  if (frac.length < minDecimals) frac = frac.padEnd(minDecimals, "0");
+  return `${negative ? "-" : ""}${group((abs / scale).toString())}${frac ? `.${frac}` : ""}`;
+}
+
 /** Parses what a person typed into minor units. Throws MoneyError on bad input. */
 export function parseAmount(input: string, currency: Currency): bigint {
   const label = `${currency} amount`;

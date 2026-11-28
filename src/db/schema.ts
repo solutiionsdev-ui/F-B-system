@@ -35,6 +35,10 @@ export const organizations = pgTable("organizations", {
   /** Approved rounding allowance per currency: decides Balanced vs Flagged, never skips the explanation. */
   toleranceUsdCents: money("tolerance_usd_cents").notNull().default(0n),
   toleranceLbp: money("tolerance_lbp").notNull().default(0n),
+  /** Food cost settings (basis points, 10000 = 100%). menuVatBp null: menu prices not marked as VAT-inclusive. */
+  foodCostTargetBp: integer("food_cost_target_bp").notNull().default(3000),
+  overheadBp: integer("overhead_bp").notNull().default(0),
+  menuVatBp: integer("menu_vat_bp"),
   createdAt: ts("created_at").notNull().defaultNow(),
 });
 
@@ -301,4 +305,99 @@ export const posImports = pgTable("pos_imports", {
   postedAt: ts("posted_at"),
   undoneBy: uuid("undone_by"),
   undoneAt: ts("undone_at"),
+});
+
+// ---------------------------------------------------------------- kitchen (stage A)
+// Quantities in thousandths of the base unit, prices in ten-thousandths of the
+// currency, percentages in basis points. See migration 0011.
+
+export type BaseUnit = "g" | "ml" | "unit";
+export type RecipeUnit = "g" | "kg" | "ml" | "l" | "unit";
+
+export const ingredients = pgTable("ingredients", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  orgId: uuid("org_id").notNull(),
+  name: text("name").notNull(),
+  baseUnit: text("base_unit").$type<BaseUnit>().notNull(),
+  gramsPerMlE4: money("grams_per_ml_e4"),
+  gramsPerUnitMilli: money("grams_per_unit_milli"),
+  yieldBp: integer("yield_bp").notNull().default(10000),
+  category: text("category"),
+  supplier: text("supplier"),
+  note: text("note"),
+  archived: boolean("archived").notNull().default(false),
+  createdBy: uuid("created_by"),
+  createdAt: ts("created_at").notNull().defaultNow(),
+  updatedAt: ts("updated_at").notNull().defaultNow(),
+});
+
+export const ingredientPrices = pgTable("ingredient_prices", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  orgId: uuid("org_id").notNull(),
+  ingredientId: uuid("ingredient_id").notNull(),
+  currency: text("currency").$type<Currency>().notNull(),
+  priceE4: money("price_e4").notNull(),
+  perMilli: money("per_milli").notNull(),
+  packLabel: text("pack_label").notNull(),
+  supplier: text("supplier"),
+  source: text("source").$type<"manual" | "import" | "purchase">().notNull(),
+  note: text("note"),
+  effectiveAt: ts("effective_at").notNull().defaultNow(),
+  createdBy: uuid("created_by"),
+  createdAt: ts("created_at").notNull().defaultNow(),
+});
+
+export const recipes = pgTable("recipes", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  orgId: uuid("org_id").notNull(),
+  name: text("name").notNull(),
+  kind: text("kind").$type<"dish" | "prep">().notNull(),
+  category: text("category"),
+  priceCurrency: text("price_currency").$type<Currency>(),
+  sellingPriceE4: money("selling_price_e4"),
+  packagingE4: money("packaging_e4").notNull().default(0n),
+  targetBp: integer("target_bp"),
+  archived: boolean("archived").notNull().default(false),
+  createdBy: uuid("created_by"),
+  createdAt: ts("created_at").notNull().defaultNow(),
+  updatedAt: ts("updated_at").notNull().defaultNow(),
+});
+
+export const recipeVersions = pgTable("recipe_versions", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  orgId: uuid("org_id").notNull(),
+  recipeId: uuid("recipe_id").notNull(),
+  version: integer("version").notNull(),
+  yieldMilli: money("yield_milli"),
+  yieldUnit: text("yield_unit").$type<BaseUnit>(),
+  yieldEstimated: boolean("yield_estimated").notNull().default(false),
+  note: text("note"),
+  createdBy: uuid("created_by"),
+  createdAt: ts("created_at").notNull().defaultNow(),
+});
+
+export const recipeLines = pgTable("recipe_lines", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  orgId: uuid("org_id").notNull(),
+  versionId: uuid("version_id").notNull(),
+  position: integer("position").notNull(),
+  ingredientId: uuid("ingredient_id"),
+  subRecipeId: uuid("sub_recipe_id"),
+  quantityMilli: money("quantity_milli").notNull(),
+  unit: text("unit").$type<RecipeUnit>().notNull(),
+  note: text("note"),
+});
+
+export const recipeImports = pgTable("recipe_imports", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  orgId: uuid("org_id").notNull(),
+  fileName: text("file_name").notNull(),
+  fileHash: text("file_hash").notNull(),
+  plan: jsonb("plan").notNull(),
+  status: text("status").$type<"draft" | "posted" | "discarded">().notNull().default("draft"),
+  summary: jsonb("summary"),
+  createdBy: uuid("created_by"),
+  createdAt: ts("created_at").notNull().defaultNow(),
+  postedBy: uuid("posted_by"),
+  postedAt: ts("posted_at"),
 });
