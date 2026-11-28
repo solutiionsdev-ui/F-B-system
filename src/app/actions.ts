@@ -679,7 +679,7 @@ export async function uploadRecipeWorkbookAction(_: ActionState, fd: FormData): 
   const ctx = await requireContext();
   const db = await getDb();
   const file = fd.get("file");
-  if (!(file instanceof File) || file.size === 0) return { error: "Choose the costing workbook (.xlsx)." };
+  if (!(file instanceof File) || file.size === 0) return { error: "Choose the workbook (.xlsx)." };
   let id: string;
   try {
     id = await createRecipeImport(db, ctx.scope, { fileName: file.name, bytes: new Uint8Array(await file.arrayBuffer()) });

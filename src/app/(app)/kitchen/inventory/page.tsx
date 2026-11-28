@@ -1,5 +1,6 @@
 import Link from "next/link";
-import { Badge, Card, formatTime } from "@/components/ui";
+import { Icon } from "@/components/icons";
+import { Badge, buttonClass, Card, formatTime } from "@/components/ui";
 import { formatPrice } from "@/lib/costing";
 import { requireContext } from "@/server/auth";
 import { getDb } from "@/server/db";
@@ -23,6 +24,13 @@ export default async function InventoryPage({ searchParams }: { searchParams: Pr
       <KitchenTitle
         title="Inventory"
         subtitle="Every ingredient, how it's measured and what it costs now. Each new price is kept with its date and supplier, and every recipe using the ingredient is recosted. Stock on hand, purchases and counts come in the next stage."
+        actions={
+          canEdit && (
+            <Link href="/kitchen/import?kind=prices" className={buttonClass("secondary")}>
+              <Icon name="import" size={16} /> Import prices from Excel
+            </Link>
+          )
+        }
       />
       <div className="grid items-start gap-6 lg:grid-cols-[minmax(0,1fr)_360px]">
         <Card
@@ -39,7 +47,7 @@ export default async function InventoryPage({ searchParams }: { searchParams: Pr
           }
         >
           {rows.length === 0 ? (
-            <p className="text-sm text-stone-500">{sp.show === "missing" ? "Every ingredient has a price." : "No ingredients yet. Add one, or import your costing workbook from Recipes."}</p>
+            <p className="text-sm text-stone-500">{sp.show === "missing" ? "Every ingredient has a price." : "No ingredients yet. Add one, or import your price list from Excel."}</p>
           ) : (
             <div className="-mx-5 -my-4 overflow-x-auto">
               <table className="w-full text-sm">

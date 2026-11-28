@@ -85,8 +85,17 @@ describe("reading the workbook", () => {
     expect(costs.get("r:grilled potato")!.complete).toBe(true);
   });
 
-  it("refuses a workbook without the expected sheets", () => {
-    expect(() => readWorkbook([{ name: "Sheet1", rows: [["a"]] }])).toThrow(/menu costing workbook/);
+  it("refuses a workbook without a price list sheet", () => {
+    expect(() => readWorkbook([{ name: "Sheet1", rows: [["a"]] }])).toThrow(/needs a price list sheet/);
+  });
+
+  it("reads a price list on its own: ingredients and prices, no recipes, no settings", () => {
+    const plan = readWorkbook([SAMPLE_WORKBOOK[0]]);
+    expect(plan.ingredients.map((i) => i.name)).toContain("white cheese");
+    expect(plan.ingredients).toHaveLength(9);
+    expect(plan.recipes).toEqual([]);
+    expect(plan.settings).toEqual({ targetBp: null, overheadBp: null });
+    expect(plan.issues.filter((i) => i.level === "error")).toEqual([]);
   });
 });
 

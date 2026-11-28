@@ -31,7 +31,7 @@ import {
   type RecipeCost,
 } from "@/lib/costing";
 import { cleanName, keyOf, planCosts, planToJson, readWorkbook, type Plan, type Sheet } from "@/lib/menu-workbook";
-import { MoneyError, parseDecimal, parseRate } from "@/lib/money";
+import { divRound, MoneyError, parseDecimal, parseRate } from "@/lib/money";
 import { can } from "@/lib/permissions";
 import { currentRate, requirePermission, UserError } from "./operations";
 
@@ -574,6 +574,9 @@ export async function createRecipeImport(db: DB, scope: TenantScope, input: { fi
   } catch (e) {
     throw new UserError(e instanceof Error ? e.message : "Couldn't read that workbook.");
   }
+  if (plan.ingredients.length === 0 && plan.recipes.length === 0) {
+    throw new UserError("There's nothing to import in this workbook yet (example rows are skipped). Add your own rows and upload it again.");
+  }
   const fileHash = createHash("sha256").update(input.bytes).digest("hex");
   return withTenant(db, scope, async (tx) => {
     const [row] = await tx
@@ -608,7 +611,15 @@ function detailsDiffer(cur: { yieldBp: number; gramsPerUnitMilli: bigint | null;
 function diffPlan(plan: Plan, k: Kitchen) {
   const ingByKey = new Map(k.ingRows.map((i) => [keyOf(i.name), i]));
   const recByKey = new Map(k.recRows.map((r) => [keyOf(r.name), r]));
-  const ing = { added: 0, repriced: 0, detailed: 0, unchanged: 0, unitClash: [] as string[] };
+  const ing = {
+    added: 0,
+    repriced: 0,
+    detailed: 0,
+    unchanged: 0,
+    unitClash: [] as string[],
+    /** Each new price against the current one; changeBp per base unit when both are in the same currency. */
+    changes: [] as { name: string; from: Price | null; to: Price; changeBp: number | null }[],
+  };
   for (const i of plan.ingredients) {
     const cur = ingByKey.get(i.key);
     if (!cur) {
@@ -619,9 +630,20 @@ function diffPlan(plan: Plan, k: Kitchen) {
       ing.unitClash.push(i.name);
       continue;
     }
-    const repriced = Boolean(i.price && !samePrice(i.price, k.priceOf.get(cur.id)));
+    const curPrice = k.priceOf.get(cur.id);
+    const repriced = Boolean(i.price && !samePrice(i.price, curPrice));
     const detailed = detailsDiffer(cur, planDetails(i));
-    if (repriced) ing.repriced++;
+    if (repriced) {
+      ing.repriced++;
+      const to: Price = { currency: i.price!.currency, priceE4: BigInt(i.price!.priceE4), perMilli: BigInt(i.price!.perMilli), packLabel: i.price!.packLabel };
+      const from: Price | null = curPrice ? { currency: curPrice.currency, priceE4: curPrice.priceE4, perMilli: curPrice.perMilli, packLabel: curPrice.packLabel } : null;
+      // Per base unit, so "$12 per kg" against "$0.40 per bunch (30 g)" still compares.
+      const changeBp =
+        from && from.currency === to.currency && from.priceE4 > 0n
+          ? Number(divRound(to.priceE4 * from.perMilli * 10_000n, from.priceE4 * to.perMilli)) - 10_000
+          : null;
+      ing.changes.push({ name: cur.name, from, to, changeBp });
+    }
     if (detailed) ing.detailed++;
     if (!repriced && !detailed) ing.unchanged++;
   }

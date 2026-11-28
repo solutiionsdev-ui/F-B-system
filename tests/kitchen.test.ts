@@ -19,6 +19,7 @@ import {
   saveRecipe,
   setIngredientPrice,
 } from "@/server/kitchen";
+import { pricesTemplate } from "@/lib/recipe-template";
 import { writeXlsx } from "@/lib/xlsx-writer";
 import { filledTemplate, SAMPLE_WORKBOOK, workbookXlsx } from "./workbook-fixture";
 
@@ -207,5 +208,50 @@ describe("importing the filled-in template", () => {
     expect(summary.ingredientsUpdated).toBe(1);
     const tomato = (await db.select().from(ingredients).where(eq(ingredients.orgId, owner.orgId))).find((i) => i.name === "Tomato")!;
     expect(tomato.yieldBp).toBe(9500);
+  });
+});
+
+describe("importing a price list on its own (Kitchen › Inventory)", () => {
+  it("adds new prices to each ingredient's history, shows each change, and leaves recipes alone", async () => {
+    const db = database.db;
+    const recipesBefore = await db.select().from(recipes).where(eq(recipes.orgId, owner.orgId));
+    const versionsBefore = await db.select().from(recipeVersions);
+    const priceList = [
+      ["Ingredient", "Pricing Unit (kg/l/unit)", "Price per Unit", "Notes (supplier)"],
+      ["salt", "kg", "0.6", "Market"], // was $0.50 per kg: +20%
+      ["Garden herb", "unit (30g)", "0.5", "Market"], // was $0.40 per bunch: +25%
+      ["lemon", "kg", "2", ""], // was $1.50 per kg (set by the template import above): +33.33%
+      ["olive oil", "kg", "9", ""], // measured by volume in FINCTRL: left alone
+      ["Cumin", "kg", "14", "Spice shop"], // new
+    ];
+    const id = await createRecipeImport(db, owner, { fileName: "prices-december.xlsx", bytes: writeXlsx([{ name: "Prices", rows: priceList }]) });
+    const preview = (await getRecipeImport(db, owner, id))!;
+    expect(preview.plan.recipes).toEqual([]);
+    expect(preview.dishes).toEqual([]);
+    expect(preview.diff.ingredients).toMatchObject({ added: 1, repriced: 3, unitClash: ["olive oil"] });
+    const change = Object.fromEntries(preview.diff.ingredients.changes.map((c) => [c.name, c.changeBp]));
+    expect(change).toEqual({ salt: 2000, "Garden herb": 2500, lemon: 3333 });
+
+    const toastBefore = (await listRecipes(db, owner)).rows.find((r) => r.name === "Cheese toast")!;
+    const summary = await postRecipeImport(db, owner, id);
+    // Three changed prices plus the new ingredient's first one.
+    expect(summary).toMatchObject({ ingredientsAdded: 1, pricesAdded: 4, recipesAdded: 0, recipesUpdated: 0, versionsAdded: 0, settings: false, unitClashes: ["olive oil"] });
+    expect(await db.select().from(recipes).where(eq(recipes.orgId, owner.orgId))).toHaveLength(recipesBefore.length);
+    expect(await db.select().from(recipeVersions)).toHaveLength(versionsBefore.length);
+    const salt = (await db.select().from(ingredients).where(eq(ingredients.orgId, owner.orgId))).find((i) => i.name === "salt")!;
+    const history = await db.select().from(ingredientPrices).where(eq(ingredientPrices.ingredientId, salt.id));
+    expect(history.map((h) => [h.priceE4, h.source]).sort()).toEqual([
+      [5_000n, "import"],
+      [6_000n, "import"],
+    ]);
+    // Dishes using a repriced ingredient are recosted, through their preps too:
+    // 3 g of herb at $0.50 instead of $0.40 per 30 g bunch: +$0.01;
+    // 20 g of the 152 g house dressing, whose 50 g of lemon (45% usable) and 2 g of salt cost $0.055756 more: +$0.007336.
+    const toastAfter = (await listRecipes(db, owner)).rows.find((r) => r.name === "Cheese toast")!;
+    expect(toastAfter.costMicros! - toastBefore.costMicros!).toBe(10_000n + 7_336n);
+  });
+
+  it("refuses the prices template untouched, since it only has examples", async () => {
+    await expect(createRecipeImport(database.db, owner, { fileName: "finctrl-prices-template.xlsx", bytes: writeXlsx(pricesTemplate()) })).rejects.toThrow(/nothing to import/);
   });
 });

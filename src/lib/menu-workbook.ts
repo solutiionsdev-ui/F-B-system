@@ -140,9 +140,11 @@ export function readWorkbook(sheets: Sheet[]): Plan {
   const priceSheet = findSheet(sheets, ["pricelist", "prices", "ingredients", "ingredientprices"]);
   const recipeSheet = findSheet(sheets, ["recipes", "recipe"]);
   const menuSheet = findSheet(sheets, ["menucosts", "menucost", "menu", "costs"]);
-  if (!priceSheet || !recipeSheet) {
-    throw new Error("This doesn't look like a menu costing workbook: it needs a price list sheet (PriceList) and a Recipes sheet.");
+  if (!priceSheet) {
+    throw new Error("This doesn't look like a price list or costing workbook: it needs a price list sheet (named PriceList, Prices or Ingredients).");
   }
+  // A price list on its own is fine: then only ingredients and prices are imported.
+  const recipeSheetName = recipeSheet?.name ?? "Recipes";
 
   // ---- price list
   const ph = priceSheet.rows[0] ?? [];
@@ -195,32 +197,34 @@ export function readWorkbook(sheets: Sheet[]): Plan {
   });
 
   // ---- recipes: group the lines by dish
-  const rh = recipeSheet.rows[0] ?? [];
-  const rc = columns(rh, { dish: /menu item|dish|recipe/i, ing: /ingredient/i, qty: /^\s*qty\s*$|quantity/i, unit: /qty unit|unit/i });
-  if (rc.dish < 0 || rc.ing < 0 || rc.qty < 0 || rc.unit < 0) throw new Error(`The ${recipeSheet.name} sheet needs Menu Item, Ingredient, Qty and Qty Unit columns.`);
   type RawLine = { ing: string; qtyRaw: string; unitRaw: string; row: number };
   const byDish = new Map<string, { name: string; lines: RawLine[]; firstRow: number }>();
-  recipeSheet.rows.slice(1).forEach((r, i) => {
-    const row = i + 2;
-    const dish = cleanName(cell(r, rc.dish));
-    const ingName = cleanName(cell(r, rc.ing));
-    if (!dish && !ingName) return;
-    if (isExampleName(dish)) {
-      exampleRows++;
-      return;
-    }
-    if (!dish) {
-      issue("warning", recipeSheet.name, row, ingName, "Ingredient line with no dish name; skipped.");
-      return;
-    }
-    const key = dish.toLowerCase();
-    if (!byDish.has(key)) byDish.set(key, { name: dish, lines: [], firstRow: row });
-    if (!ingName) {
-      issue("warning", recipeSheet.name, row, dish, "Line with no ingredient; skipped.");
-      return;
-    }
-    byDish.get(key)!.lines.push({ ing: ingName, qtyRaw: cell(r, rc.qty), unitRaw: cell(r, rc.unit), row });
-  });
+  if (recipeSheet) {
+    const rh = recipeSheet.rows[0] ?? [];
+    const rc = columns(rh, { dish: /menu item|dish|recipe/i, ing: /ingredient/i, qty: /^\s*qty\s*$|quantity/i, unit: /qty unit|unit/i });
+    if (rc.dish < 0 || rc.ing < 0 || rc.qty < 0 || rc.unit < 0) throw new Error(`The ${recipeSheet.name} sheet needs Menu Item, Ingredient, Qty and Qty Unit columns.`);
+    recipeSheet.rows.slice(1).forEach((r, i) => {
+      const row = i + 2;
+      const dish = cleanName(cell(r, rc.dish));
+      const ingName = cleanName(cell(r, rc.ing));
+      if (!dish && !ingName) return;
+      if (isExampleName(dish)) {
+        exampleRows++;
+        return;
+      }
+      if (!dish) {
+        issue("warning", recipeSheet.name, row, ingName, "Ingredient line with no dish name; skipped.");
+        return;
+      }
+      const key = dish.toLowerCase();
+      if (!byDish.has(key)) byDish.set(key, { name: dish, lines: [], firstRow: row });
+      if (!ingName) {
+        issue("warning", recipeSheet.name, row, dish, "Line with no ingredient; skipped.");
+        return;
+      }
+      byDish.get(key)!.lines.push({ ing: ingName, qtyRaw: cell(r, rc.qty), unitRaw: cell(r, rc.unit), row });
+    });
+  }
 
   // ---- menu costs
   const menu = new Map<
@@ -311,17 +315,17 @@ export function readWorkbook(sheets: Sheet[]): Plan {
       // The sheet's own formula counts a blank unit as pieces when the ingredient is priced per piece; do the same, and say so.
       if (!unit && !l.unitRaw.trim() && ingredients.get(l.ing.toLowerCase())?.baseUnit === "unit") {
         unit = "unit";
-        issue("warning", recipeSheet.name, l.row, d.name, `${l.ing}: no unit; taken as pieces, since it's priced per piece.`);
+        issue("warning", recipeSheetName, l.row, d.name, `${l.ing}: no unit; taken as pieces, since it's priced per piece.`);
       }
       if (!unit) {
-        issue("error", recipeSheet.name, l.row, d.name, `${l.ing}: ${l.unitRaw.trim() ? `unit "${l.unitRaw.trim()}" isn't g, kg, ml, L or unit` : "no unit"}; line skipped.`);
+        issue("error", recipeSheetName, l.row, d.name, `${l.ing}: ${l.unitRaw.trim() ? `unit "${l.unitRaw.trim()}" isn't g, kg, ml, L or unit` : "no unit"}; line skipped.`);
         continue;
       }
       if (qty == null || qty < 0n) {
-        issue("error", recipeSheet.name, l.row, d.name, `${l.ing}: no quantity; line skipped.`);
+        issue("error", recipeSheetName, l.row, d.name, `${l.ing}: no quantity; line skipped.`);
         continue;
       }
-      if (qty === 0n) issue("warning", recipeSheet.name, l.row, d.name, `${l.ing}: quantity is 0.`);
+      if (qty === 0n) issue("warning", recipeSheetName, l.row, d.name, `${l.ing}: quantity is 0.`);
       const k = l.ing.toLowerCase();
       if (byDish.has(k) && isPrep(k) && k !== key) {
         lines.push({ ref: { type: "prep", key: k }, quantityMilli: qty.toString(), unit, row: l.row });
@@ -330,11 +334,11 @@ export function readWorkbook(sheets: Sheet[]): Plan {
       if (!ingredients.has(k)) {
         const base: BaseUnit = unit === "g" || unit === "kg" ? "g" : unit === "unit" ? "unit" : "ml";
         ingredients.set(k, { key: k, name: l.ing, baseUnit: base, price: null, supplier: null, category: null, yieldBp: null, gramsPerUnitMilli: null, gramsPerMlE4: null, row: l.row });
-        issue("warning", recipeSheet.name, l.row, l.ing, `Not in the price list; added without a price (used in ${d.name}).`);
+        issue("warning", recipeSheetName, l.row, l.ing, `Not in the price list; added without a price (used in ${d.name}).`);
       }
       lines.push({ ref: { type: "ingredient", key: k }, quantityMilli: qty.toString(), unit, row: l.row });
     }
-    if (lines.length === 0) issue("warning", recipeSheet.name, d.firstRow, d.name, "No usable ingredient lines.");
+    if (lines.length === 0) issue("warning", recipeSheetName, d.firstRow, d.name, "No usable ingredient lines.");
 
     let yieldMilli: string | null = null;
     let yieldUnit: BaseUnit | null = null;
@@ -356,7 +360,7 @@ export function readWorkbook(sheets: Sheet[]): Plan {
       yieldUnit = (Object.entries(counts).sort((a, b) => b[1] - a[1])[0]?.[0] as BaseUnit) ?? "g";
       if (yieldUnit === "unit") {
         yieldUnit = null;
-        issue("error", recipeSheet.name, d.firstRow, d.name, "Used by the piece in other recipes: set how many pieces one batch makes.");
+        issue("error", recipeSheetName, d.firstRow, d.name, "Used by the piece in other recipes: set how many pieces one batch makes.");
       } else {
         let total = 0n;
         let pieces = false;
@@ -370,19 +374,19 @@ export function readWorkbook(sheets: Sheet[]): Plan {
           const shown = `${Number(total / 1000n).toLocaleString("en-US")} ${yieldUnit}`;
           issue(
             "warning",
-            recipeSheet.name,
+            recipeSheetName,
             d.firstRow,
             d.name,
             `Batch size not in the sheet: estimated at ${shown} from its ingredients (ml counted as g${pieces ? ", pieces left out" : ""}). Weigh a batch and correct it.`,
           );
         } else {
           yieldUnit = null;
-          issue("error", recipeSheet.name, d.firstRow, d.name, "Set how much one batch makes.");
+          issue("error", recipeSheetName, d.firstRow, d.name, "Set how much one batch makes.");
         }
       }
     }
 
-    if (!prep && !m?.price) issue("warning", menuSheet?.name ?? recipeSheet.name, m?.row ?? d.firstRow, d.name, "No selling price yet, so no food cost %.");
+    if (!prep && !m?.price) issue("warning", menuSheet?.name ?? recipeSheetName, m?.row ?? d.firstRow, d.name, "No selling price yet, so no food cost %.");
     recipes.push({
       key,
       name: d.name,
@@ -408,7 +412,7 @@ export function readWorkbook(sheets: Sheet[]): Plan {
     if (near) {
       issue(
         "warning",
-        recipeSheet.name,
+        recipeSheetName,
         byDish.get(r.key)!.firstRow,
         r.name,
         `Looks like "${near.name}" in the price list, which the dishes use instead. If they're the same, give them the same name so the recipe is used.`,

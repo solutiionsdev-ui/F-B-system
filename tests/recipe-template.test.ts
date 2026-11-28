@@ -5,7 +5,7 @@
 import { describe, expect, it } from "vitest";
 import readXlsxFile from "read-excel-file/node";
 import { planCosts, readWorkbook, type Sheet } from "@/lib/menu-workbook";
-import { recipeTemplate, TEMPLATE_HEADERS } from "@/lib/recipe-template";
+import { pricesTemplate, recipeTemplate, TEMPLATE_HEADERS } from "@/lib/recipe-template";
 import { writeXlsx } from "@/lib/xlsx-writer";
 import { filledTemplate } from "./workbook-fixture";
 
@@ -49,5 +49,19 @@ describe("the recipe import template", () => {
     expect(costs.get("r:halloumi toast")).toMatchObject({ complete: true, warnings: [] });
     // Sauce batch: 80 g garlic at $4/kg, 85% usable ($0.376471) + 300 ml oil at $8.90/L ($2.67) + 60 g lemon at $1.50/kg, 45% usable ($0.2)
     expect(costs.get("r:garlic sauce")!.costMicros).toBe(376_471n + 2_670_000n + 200_000n);
+  });
+
+  it("has a prices-only version for Inventory: one price list sheet, examples skipped", async () => {
+    const sheets = await readBack(writeXlsx(pricesTemplate()));
+    expect(sheets.map((s) => s.name)).toEqual(["How to fill", "PriceList"]);
+    expect(sheets[1].rows[0]).toEqual(TEMPLATE_HEADERS.prices);
+    const untouched = readWorkbook(sheets);
+    expect(untouched).toMatchObject({ ingredients: [], recipes: [] });
+    // Filled in (the example names without "Example – "): eight ingredients with their prices and details.
+    const filled = sheets.map((s) => ({ ...s, rows: s.rows.map((r) => r.map((c) => c.replace(/^Example – /, ""))) }));
+    const plan = readWorkbook(filled);
+    expect(plan.ingredients).toHaveLength(8);
+    expect(plan.recipes).toEqual([]);
+    expect(plan.ingredients.find((i) => i.name === "Tomato")).toMatchObject({ yieldBp: 9000, price: { priceE4: 18_000n } });
   });
 });
